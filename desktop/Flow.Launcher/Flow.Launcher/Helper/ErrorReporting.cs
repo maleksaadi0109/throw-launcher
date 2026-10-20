@@ -57,7 +57,7 @@ public static class ErrorReporting
         var info =
             $"""
 
-             Flow Launcher version: {Constant.Version}
+             {Constant.FlowLauncherFullName} version: {Constant.Version}
              OS Version: {ExceptionFormatter.GetWindowsFullVersionFromRegistry()}
              IntPtr Length: {IntPtr.Size}
              x64: {Environment.Is64BitOperatingSystem}

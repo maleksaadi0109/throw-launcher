@@ -25,9 +25,9 @@ jobs:
       - name: Build portable Windows test package
         shell: pwsh
         run: ./desktop/Flow.Launcher/Scripts/build-lite.ps1
-      - name: Run focused resource-policy tests
+      - name: Run resource-policy and runtime theme tests
         shell: pwsh
-        run: dotnet test desktop/Flow.Launcher/Flow.Launcher.Test/Flow.Launcher.Test.csproj -c Release --no-build --filter "FullyQualifiedName~LiteModeTests" --logger "trx;LogFileName=lite-mode.trx"
+        run: dotnet test desktop/Flow.Launcher/Flow.Launcher.Test/Flow.Launcher.Test.csproj -c Release --no-build --filter "FullyQualifiedName~LiteModeTests|FullyQualifiedName~ThemeRuntimeTests" --logger "trx;LogFileName=lite-mode.trx"
       - name: Run portable lifecycle checks
         shell: pwsh
         run: dotnet run --project verification/Flow.Launcher.LiteChecks/Flow.Launcher.LiteChecks.csproj -c Release

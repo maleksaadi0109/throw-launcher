@@ -17,6 +17,15 @@ internal static class DesktopDesignChecks
         ];
         foreach (var file in files) XDocument.Load(Path.Combine(app, file));
         Check(true, "Throw views and theme are well-formed XML (not WPF compilation).");
+        foreach (var file in Directory.EnumerateFiles(app, "*.xaml", SearchOption.AllDirectories)
+            .Where(path => !path.Split(Path.DirectorySeparatorChar).Any(part => part is "obj" or "bin" or "Output")))
+        {
+            var xml = XDocument.Load(file);
+            Check(!xml.Root!.DescendantsAndSelf().Attributes().Any(attribute =>
+                attribute.IsNamespaceDeclaration &&
+                Regex.IsMatch(attribute.Value, @";assembly=Flow\.Launcher(?:;|$)")),
+                $"No obsolete host assembly in XAML namespaces: {Path.GetRelativePath(app, file)}.");
+        }
 
         var window = XDocument.Load(Path.Combine(app, "SettingWindow.xaml"));
         var menu = window.Descendants().Single(e => e.Name.LocalName == "NavigationView.MenuItems");
