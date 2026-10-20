@@ -1,0 +1,39 @@
+name: Build Throw Launcher on Windows
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "desktop/Flow.Launcher/**"
+      - "verification/**"
+      - ".github/workflows/flow-lite-windows.yml"
+  pull_request:
+    paths:
+      - "desktop/Flow.Launcher/**"
+      - "verification/**"
+      - ".github/workflows/flow-lite-windows.yml"
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+      - name: Build portable Windows test package
+        shell: pwsh
+        run: ./desktop/Flow.Launcher/Scripts/build-lite.ps1
+      - name: Run focused resource-policy tests
+        shell: pwsh
+        run: dotnet test desktop/Flow.Launcher/Flow.Launcher.Test/Flow.Launcher.Test.csproj -c Release --no-build --filter "FullyQualifiedName~LiteModeTests" --logger "trx;LogFileName=lite-mode.trx"
+      - name: Run portable lifecycle checks
+        shell: pwsh
+        run: dotnet run --project verification/Flow.Launcher.LiteChecks/Flow.Launcher.LiteChecks.csproj -c Release
+      - name: Upload Windows test package
+        uses: actions/upload-artifact@v4
+        with:
+          name: throw-launcher-windows
+          path: generated-artifacts/windows/*.zip
+          if-no-files-found: error

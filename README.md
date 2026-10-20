@@ -5,7 +5,7 @@
 <h1 align="center">Throw Launcher</h1>
 <p align="center"><strong>A Windows launcher with more control over what stays in memory.</strong></p>
 <p align="center">
-  <a href="https://github.com/maleksaadi0109/throw-launcher/actions/workflows/flow-lite-windows.yml"><img alt="Windows build" src="https://github.com/maleksaadi0109/throw-launcher/actions/workflows/flow-lite-windows.yml/badge.svg" /></a>
+  <img alt="Windows build not yet verified" src="https://img.shields.io/badge/Windows_build-not_yet_verified-FD662B" />
   <img alt="Windows x64" src="https://img.shields.io/badge/platform-Windows_x64-122021" />
   <img alt="Experimental" src="https://img.shields.io/badge/status-experimental-FD662B" />
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-122021" /></a>
@@ -40,9 +40,14 @@ startup path unless they explicitly declare compatibility.
 
 There is no signed installer or stable Throw Launcher release yet.
 
-If the [Windows workflow](https://github.com/maleksaadi0109/throw-launcher/actions/workflows/flow-lite-windows.yml)
-has succeeded, its run contains a `throw-launcher-windows` artifact. Otherwise,
-build the source:
+**Windows automation is not activated yet:** GitHub accepted the application
+source but rejected uploading `.github/workflows` through the current
+connection. The [workflow template](build-support/flow-lite-windows.yml) is
+provided as a normal source file. Once uploaded to
+`.github/workflows/flow-lite-windows.yml` with sufficient GitHub permission, a
+successful run will contain a `throw-launcher-windows` artifact.
+
+Until then, build the source:
 
 ### Requirements
 
@@ -93,8 +98,8 @@ dotnet run --project verification/Flow.Launcher.LiteChecks -c Release
 ```
 
 Focused Windows tests cover settings preservation, cache bounds, optional
-preloading, serialization and restart-state detection. The GitHub workflow runs
-them after building the Windows solution.
+preloading, serialization and restart-state detection. The supplied Windows
+workflow is configured to run them after building the solution; it has not run yet.
 
 For comparable idle measurements on Windows:
 
@@ -118,7 +123,7 @@ alongside idle RAM.
 branding/                         New Throw Launcher logo: SVG, PNG, ICO
 desktop/Flow.Launcher/             Original desktop source and fork changes
 verification/                     Portable lifecycle and source checks
-.github/workflows/                Windows build and focused tests
+build-support/                    Windows workflow template (not yet activated)
 generated-artifacts/              Ignored local packages and measurements
 ```
 
