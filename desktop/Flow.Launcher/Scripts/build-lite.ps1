@@ -8,6 +8,13 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 if (-not $IsWindows) { throw "Build this Windows desktop application on Windows with PowerShell 7 and .NET 9 SDK." }
 $root = Split-Path $PSScriptRoot -Parent
+$brandIcon = Join-Path $root "..\..\branding\throw-launcher.ico"
+foreach ($icon in @("Flow.Launcher\Resources\app.ico", "Flow.Launcher\Images\app.ico")) {
+    if ((Get-FileHash (Join-Path $root $icon) -Algorithm SHA256).Hash -ne
+        (Get-FileHash $brandIcon -Algorithm SHA256).Hash) {
+        throw "Throw branding mismatch: $icon. Refusing to package an upstream or stale launcher icon."
+    }
+}
 $output = [System.IO.Path]::GetFullPath($OutputDirectory)
 $staging = Join-Path $output "Throw-Launcher-$Runtime"
 if (Test-Path $staging) {
@@ -21,6 +28,10 @@ try {
     dotnet publish Flow.Launcher/Flow.Launcher.csproj -c Release -r $Runtime --self-contained true -p:SkipLauncherTermination=true -o $staging --nologo
     if ($LASTEXITCODE -ne 0) { throw "Windows publish failed ($LASTEXITCODE)." }
     Copy-Item Output/Release/Plugins (Join-Path $staging "Plugins") -Recurse -Force
+    if (-not (Test-Path (Join-Path $staging "Flow.Launcher.exe"))) {
+        throw "Publish did not produce Flow.Launcher.exe. No Windows package was created."
+    }
+    Copy-Item $brandIcon (Join-Path $staging "Throw-Launcher.ico")
     # An empty UserData directory selects portable mode. No installed profile
     # or application files are modified by this script.
     New-Item -ItemType Directory (Join-Path $staging "UserData") | Out-Null

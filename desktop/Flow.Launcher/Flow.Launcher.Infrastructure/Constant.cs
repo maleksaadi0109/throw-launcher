@@ -42,7 +42,7 @@ namespace Flow.Launcher.Infrastructure
 
         public static readonly string QueryTextBoxIconImagePath = $"{ProgramDirectory}\\Images\\mainsearch.svg";
 
-        public const string DefaultTheme = "Win11Light";
+        public const string DefaultTheme = "Throw";
 
         public const string Light = "Light";
         public const string Dark = "Dark";

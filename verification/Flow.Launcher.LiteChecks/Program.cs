@@ -82,4 +82,5 @@ foreach (var plugin in new[] { "Calculator", "Url" })
     Check(manifest.RootElement.GetProperty("SupportsLazyInitialization").GetBoolean(),
         $"{plugin} explicitly opts into first-use loading.");
 }
+DesktopDesignChecks.Run(workspace);
 Console.WriteLine("Windows semantic compilation, UI tests and memory measurements are still required.");

@@ -216,6 +216,20 @@
 
     <Border MouseDown="OnMouseDown" Style="{DynamicResource WindowBorderStyle}">
         <StackPanel Orientation="Vertical">
+            <Border Margin="14 10 14 0" Padding="4 0 4 10" BorderThickness="0 0 0 1"
+                    BorderBrush="#466D7472">
+                <DockPanel LastChildFill="False">
+                    <Image DockPanel.Dock="Left" Width="24" Height="24" Source="Images/app.png"
+                           RenderOptions.BitmapScalingMode="HighQuality" />
+                    <TextBlock DockPanel.Dock="Left" Margin="9 0 0 0" VerticalAlignment="Center"
+                               FontSize="12" FontWeight="SemiBold" Foreground="{Binding Foreground, ElementName=QueryTextBox}"
+                               Text="THROW" />
+                    <Button DockPanel.Dock="Right" Padding="10 3" FontSize="11"
+                            Foreground="{Binding Foreground, ElementName=QueryTextBox}" Background="Transparent"
+                            BorderThickness="0" Command="{Binding OpenSettingCommand}" Content="Settings"
+                            AutomationProperties.Name="Open Throw Launcher settings" ToolTip="Settings" />
+                </DockPanel>
+            </Border>
             <Grid x:Name="QueryBoxArea">
                 <Border MinHeight="30" Style="{DynamicResource QueryBoxBgStyle}">
                     <Grid>

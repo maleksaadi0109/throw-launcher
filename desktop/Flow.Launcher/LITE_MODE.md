@@ -6,7 +6,7 @@ attribution remain included.
 
 ## Use
 
-Open **Settings → General → Lite mode**. Lite mode is enabled by default in this
+Open **Settings → Essentials → Keep it light**. Lite mode is enabled by default in this
 fork. Turn it off and restart for the original startup/cache/row behavior.
 Existing animation, plugin-enabled, keyword, theme and search-delay preferences
 are not rewritten.
@@ -26,7 +26,7 @@ are not rewritten.
   first matching result. This primarily saves idle/startup resources.
 - Other plugins remain on the original startup path. No arbitrary third-party
   runtime is suspended, unloaded, or force-killed.
-- General's **Resource usage → Refresh snapshot** measures on request only.
+- Essentials' **Resource details → Refresh snapshot** measures on request only.
   It reports launcher memory, descendant totals, heap, cache occupancy and
   initialized/deferred plugin counts. It does not claim precise memory
   attribution to individual in-process plugins.
@@ -35,12 +35,46 @@ are not rewritten.
 - A restart notice compares requested resource settings with the active
   startup profile, including per-plugin startup overrides. Reverting the
   changes clears it; the application is never restarted automatically.
-- For compatible plugins, **Load at startup (restart)** overrides first-use
-  loading. Existing enable/disable controls remain the disabled policy.
+- Existing per-plugin startup and enable/disable preferences are retained.
+  Plugin-management pages are no longer exposed in the simplified Settings.
 
 Restart after changing resource or plugin load controls. A running session may
 already have loaded plugins; toggling Lite mode does not unload .NET assemblies.
 There are no RAM-cleaner timers or forced collections.
+
+## Throw interface and branding
+
+The native search window now has a Throw identity bar and a direct Settings
+button. Fresh profiles start with **Throw**, a rounded dark teal/orange theme;
+existing profiles keep their selected theme. Select **Settings → Themes → Throw**
+to apply it to an existing profile. Other themes and the theme editor remain.
+The identity bar is present regardless of which search theme is selected.
+
+Settings now contains only **Essentials, Themes, Shortcuts and About**. Essentials
+keeps Lite mode, start with Windows, start hidden, hide on focus loss, language,
+and an optional on-demand resource report. Shortcuts keeps the launcher hotkey
+and result-preview hotkey. The new headings are English; the language selector
+continues to affect supported existing interface text and search features.
+
+Plugins, Plugin Store and HTTP Proxy are removed from the navigation, not from
+the engine. Existing plugin configuration, proxy settings, custom shortcuts and
+other advanced preferences are not erased or reset. App/file/calculator/URL
+search still uses the original plugin architecture. About retains local settings
+folder access and upstream MIT attribution, without upstream application-update
+buttons that could replace this fork.
+
+The executable's ApplicationIcon, window icon and tray release icon use the
+existing Throw T/arrow artwork. The Windows packaging script refuses mismatched
+icon sources and also includes `Throw-Launcher.ico` for shortcuts. The internal
+executable remains `Flow.Launcher.exe` for compatibility; its filename does not
+determine its icon. Copying an older executable does not incorporate these
+changes: build the updated source first. Explorer may cache an earlier icon at
+the same path, so inspect a newly extracted build in a fresh directory.
+
+Verification here is limited to portable lifecycle/source/XML/resource-reference
+and icon-source checks. These UI changes have **not** been rendered or exercised
+on Windows, and no updated Windows executable or measured performance results
+have been produced here.
 
 ## Build a Windows test package
 

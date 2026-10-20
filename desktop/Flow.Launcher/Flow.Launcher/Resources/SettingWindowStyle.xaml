@@ -9,6 +9,34 @@
     <converters:BoolToVisibilityConverter x:Key="BoolToVisibilityConverter" />
     <converters:TextConverter x:Key="TextConverter" />
 
+    <!-- Shared native Throw settings layout; colors follow the settings light/dark theme. -->
+    <Style x:Key="ThrowSettingCard" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource Color00B}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Color03B}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="14" />
+        <Setter Property="Padding" Value="20" />
+        <Setter Property="Margin" Value="0 0 0 10" />
+    </Style>
+    <Style x:Key="ThrowPageTitle" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource Color05B}" />
+        <Setter Property="FontSize" Value="32" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Margin" Value="0 0 0 8" />
+    </Style>
+    <Style x:Key="ThrowSectionTitle" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource Color05B}" />
+        <Setter Property="FontSize" Value="16" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <Style x:Key="ThrowDescription" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource Color04B}" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+        <Setter Property="Margin" Value="0 5 0 0" />
+    </Style>
+
     <!--  Icon for Theme Type Label  -->
     <Geometry x:Key="circle_half_stroke_solid">F1 M512,512z M0,0z M448,256C448,150,362,64,256,64L256,448C362,448,448,362,448,256z M0,256A256,256,0,1,1,512,256A256,256,0,1,1,0,256z</Geometry>
 

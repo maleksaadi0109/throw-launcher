@@ -31,14 +31,10 @@
         VirtualizingStackPanel.ScrollUnit="Pixel">
         <StackPanel>
 
-            <!--  Page title  -->
-            <TextBlock
-                Margin="5 23 0 5"
-                FontSize="30"
-                Style="{StaticResource PageTitle}"
-                Text="{DynamicResource appearance}"
-                TextAlignment="left"
-                Visibility="Collapsed" />
+            <TextBlock Margin="8 24 0 12" Foreground="#FD662B" FontSize="11" FontWeight="Bold" Text="YOUR SPACE" />
+            <TextBlock Margin="8 0 0 8" Style="{StaticResource ThrowPageTitle}" Text="A different look." />
+            <TextBlock Margin="8 0 0 24" Style="{StaticResource ThrowDescription}"
+                       Text="Choose Throw for the signature look, or keep any theme you prefer. Existing choices are never overwritten." />
 
             <!--  Theme Preview and Editor  -->
             <Grid>

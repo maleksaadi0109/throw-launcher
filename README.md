@@ -72,26 +72,42 @@ executable/assembly names remain `Flow.Launcher` for compatibility. Disable
 official application auto-updates while evaluating this fork; an upstream
 update could replace the modified application.
 
+## A distinct Throw interface
+
+The native launcher has a branded identity bar, a direct Settings button, and a
+rounded teal/orange **Throw** theme. Fresh profiles use Throw by default.
+Existing profiles retain their chosen theme; select **Settings → Themes → Throw**
+to switch. All other themes and the theme editor are still available.
+
+Settings is reduced to **Essentials, Themes, Shortcuts and About**. The Plugins,
+Plugin Store and Proxy sections are no longer in the navigation. Search engines
+and existing advanced preferences remain intact; hiding their settings does not
+remove app, file, calculator or URL search. The simplified headings are English;
+the language control still affects supported existing text and search features.
+
+The existing Throw T/arrow icon is used for the Windows executable, app windows
+and release tray icon. The internal executable name stays `Flow.Launcher.exe`
+for compatibility. A new Windows build is required for these changes to appear
+in a downloaded executable; the package also includes `Throw-Launcher.ico`.
+
 ## Use Lite mode
 
-Open **Settings → General → Lite mode**:
+Open **Settings → Essentials → Keep it light**, then restart after changing
+the switch. Advanced cache/preload and plugin-management controls are omitted
+from the simplified interface, while previously saved values are preserved.
+A mode switch does not unload assemblies that are already running.
 
-1. Choose the icon-cache limit and optional historical-image preload.
-2. Choose whether compatible plugins can wait until first use.
-3. Restart after changing these settings.
-
-In a compatible plugin’s expanded settings, **Load at startup (restart)**
-overrides first-use loading. Existing plugin enable/disable controls remain
-available. A mode switch does not unload assemblies that are already running.
-
-Open **General → Resource usage**, refresh a sample, then copy or export it.
+Open **Essentials → Resource details**, refresh a sample, then copy or export it.
 Reports contain resource statistics, not full logs or settings files. Review a
 report before sharing it publicly.
 
 ## Verification and measurements
 
 Portable checks cover single initialization under concurrent searches,
-cancellation isolation, failure retention, source syntax and modified XML.
+cancellation isolation, failure retention, source syntax, modified XML,
+simplified navigation, theme resource references and matching icon sources.
+These checks do not render the native UI or verify the icon embedded in a
+produced executable. Windows visual verification of the redesign is pending.
 
 ```powershell
 dotnet run --project verification/Flow.Launcher.LiteChecks -c Release

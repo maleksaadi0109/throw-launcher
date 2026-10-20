@@ -56,12 +56,9 @@ public partial class SettingWindow
                 var selectedIndex = _viewModel.PageType.Name switch
                 {
                     nameof(SettingsPaneGeneral) => 0,
-                    nameof(SettingsPanePlugins) => 1,
-                    nameof(SettingsPanePluginStore) => 2,
-                    nameof(SettingsPaneTheme) => 3,
-                    nameof(SettingsPaneHotkey) => 4,
-                    nameof(SettingsPaneProxy) => 5,
-                    nameof(SettingsPaneAbout) => 6,
+                    nameof(SettingsPaneTheme) => 1,
+                    nameof(SettingsPaneHotkey) => 2,
+                    nameof(SettingsPaneAbout) => 3,
                     _ => 0
                 };
                 NavView.SelectedItem = NavView.MenuItems[selectedIndex];
@@ -212,11 +209,8 @@ public partial class SettingWindow
             var pageType = selectedItem.Name switch
             {
                 nameof(General) => typeof(SettingsPaneGeneral),
-                nameof(Plugins) => typeof(SettingsPanePlugins),
-                nameof(PluginStore) => typeof(SettingsPanePluginStore),
                 nameof(Theme) => typeof(SettingsPaneTheme),
                 nameof(Hotkey) => typeof(SettingsPaneHotkey),
-                nameof(Proxy) => typeof(SettingsPaneProxy),
                 nameof(About) => typeof(SettingsPaneAbout),
                 _ => typeof(SettingsPaneGeneral)
             };

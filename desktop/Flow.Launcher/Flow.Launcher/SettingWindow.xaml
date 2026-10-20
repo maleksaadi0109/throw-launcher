@@ -7,11 +7,11 @@
     xmlns:controls="clr-namespace:Flow.Launcher.Resources.Controls"
     xmlns:ui="http://schemas.inkore.net/lib/ui/wpf/modern"
     xmlns:vm="clr-namespace:Flow.Launcher.ViewModel"
-    Title="{DynamicResource flowlauncher_settings}"
+    Title="Throw Launcher — Settings"
     Width="{Binding SettingWindowWidth, Mode=TwoWay}"
     Height="{Binding SettingWindowHeight, Mode=TwoWay}"
-    MinWidth="940"
-    MinHeight="600"
+    MinWidth="760"
+    MinHeight="520"
     d:DataContext="{d:DesignInstance vm:SettingWindowViewModel}"
     Closed="OnClosed"
     FontFamily="{DynamicResource SettingWindowFont}"
@@ -63,7 +63,7 @@
                     IsSettingsVisible="False"
                     IsTabStop="False"
                     Loaded="NavView_Loaded"
-                    OpenPaneLength="240"
+                    OpenPaneLength="204"
                     PaneDisplayMode="Left"
                     SelectionChanged="NavigationView_SelectionChanged">
                     <ui:NavigationView.HeaderTemplate>
@@ -78,76 +78,48 @@
                         </DataTemplate>
                     </ui:NavigationView.HeaderTemplate>
                     <ui:NavigationView.PaneCustomContent>
-                        <Grid Margin="0 35 0 0" HorizontalAlignment="Center">
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="50" />
-                                <RowDefinition Height="27" />
-                                <RowDefinition Height="25" />
-                            </Grid.RowDefinitions>
-                            <Image
-                                Grid.Row="0"
-                                Width="50"
-                                Height="50"
-                                RenderOptions.BitmapScalingMode="HighQuality"
-                                Source="images/app.png" />
-                            <TextBlock
-                                Grid.Row="1"
-                                Margin="0 12 0 0"
-                                Style="{StaticResource TabMenu}"
-                                Text="Throw Launcher"
-                                TextAlignment="Center" />
-                        </Grid>
+                        <Border Margin="12 22 12 24" Padding="16" Background="#122021" CornerRadius="16">
+                            <StackPanel>
+                                <Image Width="48" Height="48" HorizontalAlignment="Left"
+                                       RenderOptions.BitmapScalingMode="HighQuality" Source="Images/app.png" />
+                                <TextBlock Margin="0 14 0 0" FontSize="20" FontWeight="SemiBold"
+                                           Foreground="#FFFFFF" Text="Throw" />
+                                <TextBlock Margin="0 4 0 0" FontSize="11" Foreground="#FD996F"
+                                           Text="LAUNCHER / SETTINGS" />
+                                <TextBlock Margin="0 16 0 0" Foreground="#CEDDDB" FontSize="12"
+                                           Text="Only what you need." TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
                     </ui:NavigationView.PaneCustomContent>
                     <ui:NavigationView.MenuItems>
 
-                        <ui:NavigationViewItem x:Name="General" Content="{DynamicResource general}">
+                        <ui:NavigationViewItem x:Name="General" Content="Essentials">
                             <ui:NavigationViewItem.Icon>
-                                <ui:BitmapIcon ShowAsMonochrome="False" UriSource="/Images/settings.png" />
+                                <ui:FontIcon Glyph="&#xE713;" />
                             </ui:NavigationViewItem.Icon>
                         </ui:NavigationViewItem>
 
-                        <ui:NavigationViewItem x:Name="Plugins" Content="{DynamicResource plugins}">
+                        <ui:NavigationViewItem x:Name="Theme" Content="Themes">
                             <ui:NavigationViewItem.Icon>
-                                <ui:BitmapIcon ShowAsMonochrome="False" UriSource="/Images/plugins.png" />
+                                <ui:FontIcon Glyph="&#xE790;" />
                             </ui:NavigationViewItem.Icon>
                         </ui:NavigationViewItem>
 
-                        <ui:NavigationViewItem
-                            x:Name="PluginStore"
-                            Content="{DynamicResource pluginStore}"
-                            Tag="PluginStore">
+                        <ui:NavigationViewItem x:Name="Hotkey" Content="Shortcuts">
                             <ui:NavigationViewItem.Icon>
-                                <ui:BitmapIcon ShowAsMonochrome="False" UriSource="/Images/store.png" />
+                                <ui:FontIcon Glyph="&#xE765;" />
                             </ui:NavigationViewItem.Icon>
                         </ui:NavigationViewItem>
 
-                        <ui:NavigationViewItem x:Name="Theme" Content="{DynamicResource appearance}">
+                        <ui:NavigationViewItem x:Name="About" Content="About">
                             <ui:NavigationViewItem.Icon>
-                                <ui:BitmapIcon ShowAsMonochrome="False" UriSource="/Images/theme.png" />
-                            </ui:NavigationViewItem.Icon>
-                        </ui:NavigationViewItem>
-
-                        <ui:NavigationViewItem x:Name="Hotkey" Content="{DynamicResource hotkeys}">
-                            <ui:NavigationViewItem.Icon>
-                                <ui:BitmapIcon ShowAsMonochrome="False" UriSource="/Images/keyboard.png" />
-                            </ui:NavigationViewItem.Icon>
-                        </ui:NavigationViewItem>
-
-                        <ui:NavigationViewItem x:Name="Proxy" Content="{DynamicResource proxy}">
-                            <ui:NavigationViewItem.Icon>
-                                <ui:BitmapIcon ShowAsMonochrome="False" UriSource="/Images/proxy.png" />
-                            </ui:NavigationViewItem.Icon>
-                        </ui:NavigationViewItem>
-
-                        <ui:NavigationViewItem x:Name="About" Content="{DynamicResource about}">
-                            <ui:NavigationViewItem.Icon>
-                                <ui:BitmapIcon ShowAsMonochrome="False" UriSource="/Images/info.png" />
+                                <ui:FontIcon Glyph="&#xE946;" />
                             </ui:NavigationViewItem.Icon>
                         </ui:NavigationViewItem>
 
                     </ui:NavigationView.MenuItems>
                     <Grid>
-                        <ui:Frame x:Name="ContentFrame" Margin="0" />
+                        <ui:Frame x:Name="ContentFrame" Margin="16 0 0 0" />
                     </Grid>
                 </ui:NavigationView>
             </Grid>
