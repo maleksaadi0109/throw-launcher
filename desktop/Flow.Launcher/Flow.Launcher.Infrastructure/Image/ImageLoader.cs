@@ -13,6 +13,7 @@ using Flow.Launcher.Infrastructure.Logger;
 using Flow.Launcher.Infrastructure.Storage;
 using SharpVectors.Converters;
 using SharpVectors.Renderers.Wpf;
+using BitFaster.Caching.Lfu;
 
 namespace Flow.Launcher.Infrastructure.Image
 {
@@ -27,7 +28,8 @@ namespace Flow.Launcher.Infrastructure.Image
         public static int ImageCacheCapacity => ImageCache.Capacity;
         private static Lock storageLock { get; } = new();
         private static BinaryStorage<List<(string, bool)>> _storage;
-        private static readonly ConcurrentDictionary<string, string> GuidToKey = new();
+        // Evicted images must not leave an ever-growing history of hashes/paths.
+        private static ConcurrentLfu<string, string> GuidToKey = new(300);
         private static ImageHashGenerator _hashGenerator;
         private static readonly bool EnableImageHash = true;
         public static ImageSource MissingImage => EssentialImages[Constant.MissingImgIcon];
@@ -50,6 +52,7 @@ namespace Flow.Launcher.Infrastructure.Image
         public static async Task InitializeAsync(int cacheCapacity = global::Flow.Launcher.Infrastructure.Image.ImageCache.DefaultCapacity, bool preloadImages = true)
         {
             ImageCache = new ImageCache(cacheCapacity);
+            GuidToKey = new ConcurrentLfu<string, string>(ImageCache.Capacity * 2);
             var usage = await Task.Run(() =>
             {
                 _storage = new BinaryStorage<List<(string, bool)>>("Image");
@@ -400,7 +403,7 @@ namespace Flow.Launcher.Infrastructure.Image
                 string hash = EnableImageHash ? _hashGenerator.GetHashFromImage(img) : null;
                 if (hash != null)
                 {
-                    if (GuidToKey.TryGetValue(hash, out string key))
+                    if (GuidToKey.TryGet(hash, out string key))
                     {
                         // image already exists
                         img = ImageCache[key, loadFullImage] ?? img;
@@ -408,7 +411,7 @@ namespace Flow.Launcher.Infrastructure.Image
                     else if (cacheImage)
                     {
                         // save guid key
-                        GuidToKey[hash] = path;
+                        GuidToKey.AddOrUpdate(hash, path);
                     }
                 }
 

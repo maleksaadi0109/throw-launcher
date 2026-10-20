@@ -47,6 +47,24 @@ internal static class DesktopDesignChecks
                 $"Throw theme reference resolves in its theme chain: {match.Groups[1].Value}.");
 
         var project = XDocument.Load(Path.Combine(app, "Flow.Launcher.csproj"));
+        var assemblyInfo = File.ReadAllText(Path.Combine(app, "..", "SolutionAssemblyInfo.cs"));
+        Check(assemblyInfo.Contains("AssemblyTitle(\"Throw Launcher\")") &&
+              assemblyInfo.Contains("AssemblyProduct(\"Throw Launcher\")"),
+            "Windows executable title and product metadata use Throw Launcher.");
+        var runtimeOptions = project.Descendants()
+            .Where(e => e.Name.LocalName == "RuntimeHostConfigurationOption").ToArray();
+        Check(runtimeOptions.Any(e => (string?)e.Attribute("Include") == "System.GC.ConserveMemory" &&
+                                      (string?)e.Attribute("Value") == "9"),
+            "Compact runtime profile requests memory-conserving GC (not a process memory limit).");
+        Check(runtimeOptions.Any(e => (string?)e.Attribute("Include") == "System.GC.Server" &&
+                                      (string?)e.Attribute("Value") == "false"),
+            "Compact runtime profile uses workstation GC.");
+        var imageLoader = File.ReadAllText(Path.Combine(app, "..",
+            "Flow.Launcher.Infrastructure", "Image", "ImageLoader.cs"));
+        Check(imageLoader.Contains("ConcurrentLfu<string, string> GuidToKey") &&
+              imageLoader.Contains("new ConcurrentLfu<string, string>(ImageCache.Capacity * 2)") &&
+              !imageLoader.Contains("ConcurrentDictionary<string, string> GuidToKey"),
+            "Image deduplication metadata uses a bounded cache rather than unbounded history.");
         var iconPath = project.Descendants().Single(e => e.Name.LocalName == "ApplicationIcon").Value;
         var brandIcon = File.ReadAllBytes(Path.Combine(workspace, "branding", "throw-launcher.ico"));
         foreach (var relative in new[] { iconPath, "Images/app.ico" })

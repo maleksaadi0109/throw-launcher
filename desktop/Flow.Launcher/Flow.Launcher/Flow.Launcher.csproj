@@ -12,7 +12,22 @@
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <!-- A process-start policy, independent of the live Lite UI settings.
+         Standard is available for honest same-machine comparisons. -->
+    <ThrowMemoryProfile Condition="'$(ThrowMemoryProfile)' == ''">Compact</ThrowMemoryProfile>
   </PropertyGroup>
+
+  <ItemGroup Condition="'$(ThrowMemoryProfile)' == 'Compact'">
+    <!-- Prefer a smaller managed heap, not an unsafe whole-process memory cap.
+         This can increase collection frequency and CPU/latency. -->
+    <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="9" />
+    <RuntimeHostConfigurationOption Include="System.GC.Server" Value="false" />
+  </ItemGroup>
+
+  <Target Name="ValidateThrowMemoryProfile" BeforeTargets="PrepareForBuild"
+          Condition="'$(ThrowMemoryProfile)' != 'Compact' and '$(ThrowMemoryProfile)' != 'Standard'">
+    <Error Text="ThrowMemoryProfile must be Compact or Standard." />
+  </Target>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
     <PlatformTarget>AnyCPU</PlatformTarget>

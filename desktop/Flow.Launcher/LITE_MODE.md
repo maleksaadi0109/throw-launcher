@@ -4,6 +4,43 @@ This is the original Windows/.NET/WPF launcher with reversible resource-saving
 controls. It is not a web app or a rewrite. The upstream MIT license and
 attribution remain included.
 
+## Windows identity and the 50 MB target
+
+The Windows executable title/product metadata is **Throw Launcher**, and its
+embedded icon uses the project's existing orange Throw mark. The internal
+filename remains `Flow.Launcher.exe` for compatibility. A source update cannot
+change an already-running binary: close the old launcher and start a freshly
+built portable package. The build script checks the published executable's
+FileDescription and ProductName before producing a ZIP, as well as checking
+the icon source files.
+
+**50 MB is a target, not an enforced limit or a measured result.** Task Manager
+includes more than the managed heap: WPF, native libraries, images and loaded
+plugins contribute. A screenshot showing 153.6 MB does not identify their
+individual contributions. A 50 MB managed-heap limit would not cap total memory
+and could instead cause out-of-memory failures.
+
+Portable builds now default to a **Compact runtime profile**:
+
+- Workstation GC instead of server GC.
+- `System.GC.ConserveMemory = 9`, asking .NET to conserve managed heap space.
+  More frequent collection can increase CPU use or search latency.
+- The image-deduplication hash/path lookup is bounded to twice the selected icon
+  cache capacity instead of retaining a history of every unique image.
+
+This runtime profile is applied at process startup, independently of the Lite
+mode switch. For a fair comparison, build both profiles into separate folders:
+
+```powershell
+pwsh ./desktop/Flow.Launcher/Scripts/build-lite.ps1 -MemoryProfile Compact -OutputDirectory ./generated-artifacts/compact
+pwsh ./desktop/Flow.Launcher/Scripts/build-lite.ps1 -MemoryProfile Standard -OutputDirectory ./generated-artifacts/standard
+```
+
+Use identical Lite settings, plugins, workloads and machine conditions. Compare
+idle memory, first-search latency and repeated-search latency. `BUILD-INFO.txt`
+identifies the packaged runtime profile. No periodic forced collection,
+working-set trimming or silent disabling of search features is used.
+
 ## Use
 
 Open **Settings → Essentials → Keep it light**. Lite mode is enabled by default in this

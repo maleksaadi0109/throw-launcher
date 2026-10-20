@@ -4,15 +4,15 @@ using System.Runtime.InteropServices;
 #if DEBUG
 
 [assembly: AssemblyConfiguration("Debug")]
-[assembly: AssemblyDescription("Debug build, https://github.com/Flow-Launcher/Flow.Launcher")]
+[assembly: AssemblyDescription("Throw Launcher debug build — based on Flow Launcher")]
 #else
 [assembly: AssemblyConfiguration("Release")]
-[assembly: AssemblyDescription("Release build, https://github.com/Flow-Launcher/Flow.Launcher")]
+[assembly: AssemblyDescription("Throw Launcher — based on Flow Launcher")]
 #endif
 
-[assembly: AssemblyTitle("Flow Launcher")]
-[assembly: AssemblyCompany("Flow Launcher")]
-[assembly: AssemblyProduct("Flow Launcher")]
+[assembly: AssemblyTitle("Throw Launcher")]
+[assembly: AssemblyCompany("Throw Launcher contributors")]
+[assembly: AssemblyProduct("Throw Launcher")]
 [assembly: AssemblyCopyright("The MIT License (MIT)")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
