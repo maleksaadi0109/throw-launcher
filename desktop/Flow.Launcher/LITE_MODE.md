@@ -8,7 +8,7 @@ attribution remain included.
 
 The Windows executable title/product metadata is **Throw Launcher**, and its
 embedded icon uses the project's existing orange Throw mark. The internal
-filename remains `Flow.Launcher.exe` for compatibility. A source update cannot
+filename is `Throw.Launcher.exe`, with a separate profile and singleton. A source update cannot
 change an already-running binary: close the old launcher and start a freshly
 built portable package. The build script checks the published executable's
 FileDescription and ProductName before producing a ZIP, as well as checking
@@ -103,7 +103,7 @@ buttons that could replace this fork.
 The executable's ApplicationIcon, window icon and tray release icon use the
 existing Throw T/arrow artwork. The Windows packaging script refuses mismatched
 icon sources and also includes `Throw-Launcher.ico` for shortcuts. The internal
-executable remains `Flow.Launcher.exe` for compatibility; its filename does not
+executable is `Throw.Launcher.exe`; its filename does not
 determine its icon. Copying an older executable does not incorporate these
 changes: build the updated source first. Explorer may cache an earlier icon at
 the same path, so inspect a newly extracted build in a fresh directory.
@@ -123,7 +123,7 @@ On Windows with **PowerShell 7 and .NET 9 SDK**:
 
 The script builds the solution and publishes a self-contained Windows x64
 package under `generated-artifacts/windows` at the workspace root. It creates a
-portable `UserData` directory so it does not replace an installed profile.
+portable `ThrowData` directory so it does not replace an installed profile.
 For an existing output folder, choose a new `-OutputDirectory`.
 The repository-root GitHub workflow offers the same build and focused tests
 when this project is pushed to a repository; it has not been run automatically.

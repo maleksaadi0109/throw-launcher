@@ -83,4 +83,19 @@ foreach (var plugin in new[] { "Calculator", "Url" })
         $"{plugin} explicitly opts into first-use loading.");
 }
 DesktopDesignChecks.Run(workspace);
+var imported = Flow.Launcher.Infrastructure.UserSettings.PreferenceImport.Parse(
+    """{"HideOnStartup":true,"UseAnimation":false,"LiteMode":false,"PythonPath":"evil.exe","Hotkey":"Alt+Space"}""");
+Check(imported.Count == 2 && imported["HideOnStartup"] && !imported["UseAnimation"],
+    "Preference import allows only safe boolean fields, not Lite overrides, paths or hotkeys.");
+foreach (var invalid in new[]
+{
+    "[]", """{"HideOnStartup":"yes"}""", """{"HideOnStartup":true,"HideOnStartup":false}""",
+    """{"PythonPath":"evil.exe"}""", new string(' ', 1024 * 1024 + 1)
+})
+{
+    var rejected = false;
+    try { Flow.Launcher.Infrastructure.UserSettings.PreferenceImport.Parse(invalid); }
+    catch (Exception e) when (e is FormatException or System.Text.Json.JsonException) { rejected = true; }
+    Check(rejected, "Malformed, duplicate, unsupported-only or oversized import is rejected.");
+}
 Console.WriteLine("Windows semantic compilation, UI tests and memory measurements are still required.");

@@ -30,16 +30,16 @@ try {
     dotnet publish Flow.Launcher/Flow.Launcher.csproj -c Release -r $Runtime --self-contained true -p:SkipLauncherTermination=true "-p:ThrowMemoryProfile=$MemoryProfile" -o $staging --nologo
     if ($LASTEXITCODE -ne 0) { throw "Windows publish failed ($LASTEXITCODE)." }
     Copy-Item Output/Release/Plugins (Join-Path $staging "Plugins") -Recurse -Force
-    if (-not (Test-Path (Join-Path $staging "Flow.Launcher.exe"))) {
-        throw "Publish did not produce Flow.Launcher.exe. No Windows package was created."
+    if (-not (Test-Path (Join-Path $staging "Throw.Launcher.exe"))) {
+        throw "Publish did not produce Throw.Launcher.exe. No Windows package was created."
     }
     Copy-Item $brandIcon (Join-Path $staging "Throw-Launcher.ico")
     $version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo(
-        (Join-Path $staging "Flow.Launcher.exe"))
+        (Join-Path $staging "Throw.Launcher.exe"))
     if ($version.FileDescription -ne "Throw Launcher" -or $version.ProductName -ne "Throw Launcher") {
         throw "Published executable has stale Windows branding. No ZIP will be created."
     }
-    $runtimeConfig = Get-Content (Join-Path $staging "Flow.Launcher.runtimeconfig.json") -Raw | ConvertFrom-Json
+    $runtimeConfig = Get-Content (Join-Path $staging "Throw.Launcher.runtimeconfig.json") -Raw | ConvertFrom-Json
     if ($MemoryProfile -eq "Compact") {
         $config = $runtimeConfig.runtimeOptions.configProperties
         if ($config.'System.GC.ConserveMemory' -ne 9 -or $config.'System.GC.Server' -ne $false) {
@@ -53,9 +53,9 @@ try {
         "Product: $($version.ProductName)"
         "This profile is not a 50 MB cap or a measured memory saving."
     ) | Set-Content (Join-Path $staging "BUILD-INFO.txt") -Encoding utf8
-    # An empty UserData directory selects portable mode. No installed profile
+    # An empty ThrowData directory selects portable mode. No installed profile
     # or application files are modified by this script.
-    New-Item -ItemType Directory (Join-Path $staging "UserData") | Out-Null
+    New-Item -ItemType Directory (Join-Path $staging "ThrowData") | Out-Null
     Copy-Item LITE_MODE.md $staging
     $archive = "$staging.zip"
     Compress-Archive -Path $staging -DestinationPath $archive

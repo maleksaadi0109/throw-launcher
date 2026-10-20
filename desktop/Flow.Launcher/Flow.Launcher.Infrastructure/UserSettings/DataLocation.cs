@@ -5,10 +5,10 @@ namespace Flow.Launcher.Infrastructure.UserSettings
 {
     public static class DataLocation
     {
-        public const string PortableFolderName = "UserData";
+        public const string PortableFolderName = "ThrowData";
         public const string DeletionIndicatorFile = ".dead";
         public static readonly string PortableDataPath = Path.Combine(Constant.ProgramDirectory, PortableFolderName);
-        public static readonly string RoamingDataPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "FlowLauncher");
+        public static readonly string RoamingDataPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ThrowLauncher");
         public static string DataDirectory()
         {
             if (PortableDataLocationInUse())

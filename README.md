@@ -66,28 +66,37 @@ under `generated-artifacts/windows/`. It does not replace an installed profile,
 delete older test packages, or terminate a running launcher. Choose another
 `-OutputDirectory` if a package folder already exists.
 
-**Important:** test in the portable package, back up your existing settings, and
-do not run the original launcher and this fork simultaneously. The internal
-executable/assembly names remain `Flow.Launcher` for compatibility. Disable
-official application auto-updates while evaluating this fork; an upstream
-update could replace the modified application.
+**Independent identity:** run `Throw.Launcher.exe`. Portable data lives in
+`ThrowData`; non-portable data lives in `%APPDATA%\\ThrowLauncher`. Throw has its
+own singleton and startup registration and does not modify Flow's profile.
+Fresh profiles use **Ctrl + Alt + Space**, avoiding Flow's default shortcut.
+Choose non-conflicting shortcuts if you run both apps. Upstream application
+installers are blocked; use a new Throw portable package for updates.
+
+**Optional import:** Control Center → Workspace → Import general preferences
+reads a selected Flow `Settings.json` without modifying it. Review confirmation
+before applying; Throw's previous saved settings are backed up. Only four
+boolean preferences are accepted: hide on startup, hide on focus loss, animation
+preference and accent matching. Lite remains on. Plugins, commands, credentials,
+paths, themes and shortcuts are not imported.
 
 ## A distinct Throw interface
 
 The native launcher has a branded identity bar, a direct Settings button, and a
 rounded teal/orange **Throw** theme. Fresh profiles use Throw by default.
-Existing profiles retain their chosen theme; select **Settings → Themes → Throw**
-to switch. All other themes and the theme editor are still available.
+Existing Throw profiles retain their chosen theme; select **Control Center →
+Appearance → Throw** to switch. Installed themes and text-size controls remain
+available in a new, simplified appearance page.
 
-Settings is reduced to **Essentials, Themes, Shortcuts and About**. The Plugins,
+Settings is a Throw **Control Center: Workspace, Appearance, Controls and About**. The Plugins,
 Plugin Store and Proxy sections are no longer in the navigation. Search engines
 and existing advanced preferences remain intact; hiding their settings does not
 remove app, file, calculator or URL search. The simplified headings are English;
 the language control still affects supported existing text and search features.
 
 The existing Throw T/arrow icon is used for the Windows executable, app windows
-and release tray icon. The internal executable name stays `Flow.Launcher.exe`
-for compatibility. A new Windows build is required for these changes to appear
+and release tray icon. The executable is `Throw.Launcher.exe`, while internal
+plugin contracts retain compatible upstream namespaces. A new Windows build is required for these changes to appear
 in a downloaded executable; the package also includes `Throw-Launcher.ico`.
 
 ## Use Lite mode

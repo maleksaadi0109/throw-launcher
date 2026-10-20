@@ -311,6 +311,8 @@ namespace Flow.Launcher
         [Conditional("RELEASE")]
         private static void AutoUpdates()
         {
+            if (!Constant.SupportsAutomaticAppUpdates)
+                return;
             _ = Task.Run(async () =>
             {
                 if (_settings.AutoUpdates)

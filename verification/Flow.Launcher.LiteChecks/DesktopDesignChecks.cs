@@ -22,7 +22,7 @@ internal static class DesktopDesignChecks
         var menu = window.Descendants().Single(e => e.Name.LocalName == "NavigationView.MenuItems");
         var names = menu.Elements().Select(e => (string?)e.Attribute(x + "Name")).ToArray();
         Check(names.SequenceEqual(new[] { "General", "Theme", "Hotkey", "About" }),
-            "Settings exposes only Essentials, Themes, Shortcuts and About.");
+            "Control Center exposes only Workspace, Appearance, Controls and About.");
         var navigationCode = File.ReadAllText(Path.Combine(app, "SettingWindow.xaml.cs"));
         Check(!navigationCode.Contains("nameof(Plugins)") && !navigationCode.Contains("nameof(PluginStore)") &&
               !navigationCode.Contains("nameof(Proxy)"),
@@ -74,6 +74,25 @@ internal static class DesktopDesignChecks
         Check(!File.ReadAllText(Path.Combine(app, "SettingPages/Views/SettingsPaneAbout.xaml"))
                   .Contains("UpdateAppCommand"),
             "Simplified About does not offer to replace the fork with upstream updates.");
+        Check(project.Descendants().Any(e => e.Name.LocalName == "AssemblyName" &&
+              e.Value == "Throw.Launcher"), "Independent executable assembly name is Throw.Launcher.");
+        var dataLocation = File.ReadAllText(Path.Combine(app, "..",
+            "Flow.Launcher.Infrastructure", "UserSettings", "DataLocation.cs"));
+        Check(dataLocation.Contains("\"ThrowLauncher\"") && dataLocation.Contains("\"ThrowData\"") &&
+              !dataLocation.Contains("\"FlowLauncher\""), "Throw profile locations do not share Flow storage.");
+        var constants = File.ReadAllText(Path.Combine(app, "..",
+            "Flow.Launcher.Infrastructure", "Constant.cs"));
+        Check(constants.Contains("FlowLauncher = \"Throw.Launcher\""),
+            "Startup registrations and executable lookups target Throw.");
+        var singleton = File.ReadAllText(Path.Combine(app, "Helper/SingleInstance.cs"));
+        Check(singleton.Contains("\"Throw.Launcher_Unique_Application_Mutex\""),
+            "Throw does not signal the upstream application's singleton.");
+        Check(general.Contains("ImportPreferencesCommand") && general.Contains("Settings.LiteIconCacheCapacity"),
+            "Control Center exposes optional preference import and icon cache control.");
+        var defaults = File.ReadAllText(Path.Combine(app, "..",
+            "Flow.Launcher.Infrastructure", "UserSettings", "Settings.cs"));
+        Check(defaults.Contains("bool LiteMode { get; set; } = true"),
+            "New independent profiles default to Lite mode.");
     }
 
     private static void Check(bool condition, string description)

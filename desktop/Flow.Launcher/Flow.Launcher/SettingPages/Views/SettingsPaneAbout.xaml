@@ -6,7 +6,7 @@
     Title="About Throw">
     <ui:ScrollViewerEx HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
         <StackPanel Margin="8 24 24 28">
-            <TextBlock Foreground="#FD662B" FontSize="11" FontWeight="Bold" Text="BUILT TO GET YOU THERE" Margin="0 0 0 12" />
+            <TextBlock Foreground="#FD662B" FontSize="11" FontWeight="Bold" Text="THROW / IDENTITY" Margin="0 0 0 12" />
             <TextBlock Style="{StaticResource ThrowPageTitle}" Text="This is Throw." />
             <Border Margin="0 16 0 20" Padding="24" CornerRadius="18" Background="#122021">
                 <StackPanel>
@@ -22,7 +22,7 @@
                 <StackPanel>
                     <TextBlock Style="{StaticResource ThrowSectionTitle}" Text="Your data stays yours" />
                     <TextBlock Style="{StaticResource ThrowDescription}"
-                               Text="Settings are saved locally. Opening this folder does not reset or delete them." />
+                               Text="Throw uses its own executable, startup registration and local profile. Flow Launcher's existing settings and plugins are not modified. Portable Throw settings live in ThrowData." />
                     <Button Margin="0 16 0 0" HorizontalAlignment="Left" Content="Open settings folder"
                             Command="{Binding OpenParentOfSettingsFolderCommand}" />
                 </StackPanel>

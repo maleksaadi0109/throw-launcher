@@ -7,7 +7,7 @@
     xmlns:controls="clr-namespace:Flow.Launcher.Resources.Controls"
     xmlns:ui="http://schemas.inkore.net/lib/ui/wpf/modern"
     xmlns:vm="clr-namespace:Flow.Launcher.ViewModel"
-    Title="Throw Launcher — Settings"
+    Title="Throw — Control Center"
     Width="{Binding SettingWindowWidth, Mode=TwoWay}"
     Height="{Binding SettingWindowHeight, Mode=TwoWay}"
     MinWidth="760"
@@ -63,7 +63,7 @@
                     IsSettingsVisible="False"
                     IsTabStop="False"
                     Loaded="NavView_Loaded"
-                    OpenPaneLength="204"
+                    OpenPaneLength="220"
                     PaneDisplayMode="Left"
                     SelectionChanged="NavigationView_SelectionChanged">
                     <ui:NavigationView.HeaderTemplate>
@@ -85,27 +85,27 @@
                                 <TextBlock Margin="0 14 0 0" FontSize="20" FontWeight="SemiBold"
                                            Foreground="#FFFFFF" Text="Throw" />
                                 <TextBlock Margin="0 4 0 0" FontSize="11" Foreground="#FD996F"
-                                           Text="LAUNCHER / SETTINGS" />
+                                           Text="CONTROL CENTER" />
                                 <TextBlock Margin="0 16 0 0" Foreground="#CEDDDB" FontSize="12"
-                                           Text="Only what you need." TextWrapping="Wrap" />
+                                           Text="Your workspace. Your pace. A separate profile, built for Throw." TextWrapping="Wrap" />
                             </StackPanel>
                         </Border>
                     </ui:NavigationView.PaneCustomContent>
                     <ui:NavigationView.MenuItems>
 
-                        <ui:NavigationViewItem x:Name="General" Content="Essentials">
+                        <ui:NavigationViewItem x:Name="General" Content="Workspace">
                             <ui:NavigationViewItem.Icon>
                                 <ui:FontIcon Glyph="&#xE713;" />
                             </ui:NavigationViewItem.Icon>
                         </ui:NavigationViewItem>
 
-                        <ui:NavigationViewItem x:Name="Theme" Content="Themes">
+                        <ui:NavigationViewItem x:Name="Theme" Content="Appearance">
                             <ui:NavigationViewItem.Icon>
                                 <ui:FontIcon Glyph="&#xE790;" />
                             </ui:NavigationViewItem.Icon>
                         </ui:NavigationViewItem>
 
-                        <ui:NavigationViewItem x:Name="Hotkey" Content="Shortcuts">
+                        <ui:NavigationViewItem x:Name="Hotkey" Content="Controls">
                             <ui:NavigationViewItem.Icon>
                                 <ui:FontIcon Glyph="&#xE765;" />
                             </ui:NavigationViewItem.Icon>

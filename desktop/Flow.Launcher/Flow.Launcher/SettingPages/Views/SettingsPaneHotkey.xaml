@@ -4,13 +4,13 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:flowlauncher="clr-namespace:Flow.Launcher"
     xmlns:ui="http://schemas.inkore.net/lib/ui/wpf/modern"
-    Title="Shortcuts">
+    Title="Controls">
     <ui:ScrollViewerEx HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
         <StackPanel Margin="8 24 24 28">
-            <TextBlock Foreground="#FD662B" FontSize="11" FontWeight="Bold" Text="LESS CLICKING" Margin="0 0 0 12" />
-            <TextBlock Style="{StaticResource ThrowPageTitle}" Text="At your fingertips." />
+            <TextBlock Foreground="#FD662B" FontSize="11" FontWeight="Bold" Text="THROW / CONTROLS" Margin="0 0 0 12" />
+            <TextBlock Style="{StaticResource ThrowPageTitle}" Text="One shortcut. Your workspace." />
             <TextBlock Style="{StaticResource ThrowDescription}" Margin="0 0 0 24"
-                       Text="Open Throw, preview a result, and keep moving." />
+                       Text="Fresh profiles use Ctrl + Alt + Space so Throw does not take over Flow's default shortcut. You can choose another key below." />
             <Border Style="{StaticResource ThrowSettingCard}">
                 <StackPanel>
                     <TextBlock Style="{StaticResource ThrowSectionTitle}" Text="Open Throw Launcher" />

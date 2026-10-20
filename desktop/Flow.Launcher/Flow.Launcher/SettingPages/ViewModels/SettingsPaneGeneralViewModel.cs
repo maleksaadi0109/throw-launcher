@@ -35,6 +35,77 @@ public partial class SettingsPaneGeneralViewModel : BaseModel
 
     public bool HasPerformanceSnapshot { get; private set; }
     public string ReportActionStatus { get; private set; } = string.Empty;
+    public string ImportStatus { get; private set; } =
+        "Optional: copy four general preferences from Flow. No plugins, secrets, paths, themes or shortcuts are imported.";
+
+    [RelayCommand]
+    private async System.Threading.Tasks.Task ImportPreferencesAsync()
+    {
+        try
+        {
+            var dialog = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = "Import general preferences from Flow Launcher",
+                Filter = "Settings JSON (*.json)|*.json",
+                CheckFileExists = true,
+                Multiselect = false,
+                InitialDirectory = System.IO.Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                    "FlowLauncher", "Settings")
+            };
+            if (dialog.ShowDialog(System.Windows.Application.Current.MainWindow) != true)
+                return;
+            var target = System.IO.Path.Combine(DataLocation.SettingsDirectory, "Settings.json");
+            if (string.Equals(System.IO.Path.GetFullPath(dialog.FileName),
+                    System.IO.Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase))
+                throw new FormatException("Choose Flow's Settings.json, not the active Throw profile.");
+            IReadOnlyDictionary<string, bool> values;
+            await using (var source = new System.IO.FileStream(dialog.FileName,
+                System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.Read))
+            {
+                if (source.Length > PreferenceImport.MaximumBytes)
+                    throw new FormatException("Settings file must be at most 1 MB.");
+                using var reader = new System.IO.StreamReader(source);
+                values = PreferenceImport.Parse(await reader.ReadToEndAsync());
+            }
+            var confirmation = System.Windows.MessageBox.Show(
+                $"Import {values.Count} general preferences into Throw?{Environment.NewLine}" +
+                "Hide on startup, hide on focus loss, animation preference and accent matching are supported. " +
+                "Current Throw settings will be backed up first. Flow files are read-only. " +
+                "Lite mode stays enabled; shortcuts, credentials, themes and plugins are not copied.",
+                "Import into Throw Launcher", System.Windows.MessageBoxButton.YesNo,
+                System.Windows.MessageBoxImage.Question);
+            if (confirmation != System.Windows.MessageBoxResult.Yes)
+                return;
+            if (System.IO.File.Exists(target))
+                System.IO.File.Copy(target, target + $".before-import-{Guid.NewGuid():N}.bak", false);
+            var previous = (Settings.HideOnStartup, Settings.HideWhenDeactivated,
+                Settings.UseAnimation, Settings.IgnoreAccents, Settings.LiteMode);
+            // Parse/validate the whole file before applying any supported values.
+            try
+            {
+                if (values.TryGetValue("HideOnStartup", out var hide)) Settings.HideOnStartup = hide;
+                if (values.TryGetValue("HideWhenDeactivated", out var focus)) Settings.HideWhenDeactivated = focus;
+                if (values.TryGetValue("UseAnimation", out var animation)) Settings.UseAnimation = animation;
+                if (values.TryGetValue("IgnoreAccents", out var accents)) Settings.IgnoreAccents = accents;
+                Settings.LiteMode = true;
+                Settings.SaveChecked();
+            }
+            catch
+            {
+                (Settings.HideOnStartup, Settings.HideWhenDeactivated,
+                    Settings.UseAnimation, Settings.IgnoreAccents, Settings.LiteMode) = previous;
+                throw;
+            }
+            ImportStatus = $"Imported {values.Count} preferences. Source unchanged; Lite mode remains on. Throw's previous saved profile was backed up if present.";
+        }
+        catch (Exception exception)
+        {
+            App.API.LogException(nameof(SettingsPaneGeneralViewModel), "Preference import failed", exception);
+            ImportStatus = $"Import failed: {exception.Message}";
+        }
+        OnPropertyChanged(nameof(ImportStatus));
+    }
 
     [RelayCommand(CanExecute = nameof(HasPerformanceSnapshot))]
     private void CopyPerformanceReport()

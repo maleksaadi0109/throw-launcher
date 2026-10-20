@@ -37,6 +37,13 @@ namespace Flow.Launcher.Core
 
         public async Task UpdateAppAsync(bool silentUpdate = true)
         {
+            if (!Constant.SupportsAutomaticAppUpdates)
+            {
+                if (!silentUpdate)
+                    _api.ShowMsg("Throw Launcher updates",
+                        "Get new Throw packages from the project's GitHub repository. Upstream installers are not used.");
+                return;
+            }
             await UpdateLock.WaitAsync().ConfigureAwait(false);
             try
             {

@@ -66,7 +66,16 @@ namespace Flow.Launcher.Infrastructure.UserSettings
             _storage.Save();
         }
 
-        public string Hotkey { get; set; } = $"{KeyConstant.Alt} + {KeyConstant.Space}";
+        // Import needs observable persistence failures, unlike the historical
+        // log-and-continue Save wrapper used by periodic settings saves.
+        public void SaveChecked()
+        {
+            if (_storage == null)
+                throw new InvalidOperationException("Settings storage is not initialized.");
+            ((JsonStorage<Settings>)_storage).Save();
+        }
+
+        public string Hotkey { get; set; } = $"{KeyConstant.Ctrl} + {KeyConstant.Alt} + {KeyConstant.Space}";
 
         private string _openResultModifiers = KeyConstant.Alt;
         public string OpenResultModifiers

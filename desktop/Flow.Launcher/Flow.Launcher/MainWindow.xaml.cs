@@ -136,15 +136,12 @@ namespace Flow.Launcher
                 // Update release notes version
                 _settings.ReleaseNotesVersion = Constant.Version;
 
-                // Set Backdrop Type to Acrylic for Windows 11 when First Launch. Default is None
-                if (Win32Helper.IsBackdropSupported()) _settings.BackdropType = BackdropTypes.Acrylic;
-
                 // Save settings
                 App.API.SaveAppAllSettings();
 
-                // Show Welcome Window
-                var welcomeWindow = new WelcomeWindow();
-                welcomeWindow.Show();
+                // Throw starts with its own Control Center, not upstream
+                // onboarding. Keep the default non-acrylic Lite surface.
+                Flow.Launcher.Helper.SingletonWindowOpener.Open<SettingWindow>();
             }
 
             if (Constant.Version != "1.0.0" && _settings.ReleaseNotesVersion != Constant.Version) // Skip release notes notification for developer builds (version 1.0.0)

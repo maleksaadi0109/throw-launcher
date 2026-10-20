@@ -8,5 +8,6 @@
   <ItemGroup>
     <Compile Include="../../desktop/Flow.Launcher/Flow.Launcher.Core/Plugin/DeferredPluginInitialization.cs" Link="DeferredPluginInitialization.cs" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.12.0" />
+    <Compile Include="../../desktop/Flow.Launcher/Flow.Launcher.Infrastructure/UserSettings/PreferenceImport.cs" Link="PreferenceImport.cs" />
   </ItemGroup>
 </Project>

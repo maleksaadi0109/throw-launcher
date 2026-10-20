@@ -3,19 +3,27 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:ui="http://schemas.inkore.net/lib/ui/wpf/modern"
-    Title="Essentials">
+    Title="Workspace">
     <ui:ScrollViewerEx HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
         <StackPanel Margin="8 24 24 28">
-            <TextBlock Foreground="#FD662B" FontSize="11" FontWeight="Bold" Text="MAKE IT YOURS" Margin="0 0 0 12" />
-            <TextBlock Style="{StaticResource ThrowPageTitle}" Text="The essentials." />
+            <TextBlock Foreground="#FD662B" FontSize="11" FontWeight="Bold" Text="THROW / WORKSPACE" Margin="0 0 0 12" />
+            <TextBlock Style="{StaticResource ThrowPageTitle}" Text="Small by default." />
             <TextBlock Style="{StaticResource ThrowDescription}" Margin="0 0 0 24"
-                       Text="A few useful controls. Everything else stays out of your way." />
+                       Text="An independent home for your preferences. Lite mode starts on; you decide what stays active." />
+            <Border Background="#122021" CornerRadius="18" Padding="22" Margin="0 0 0 18">
+                <StackPanel>
+                    <TextBlock Foreground="#FD996F" FontWeight="SemiBold" Text="THROW PROFILE" />
+                    <TextBlock Foreground="#FFFFFF" FontSize="21" Margin="0 8 0 8" Text="Not shared with Flow Launcher." />
+                    <TextBlock Foreground="#CEDDDB" TextWrapping="Wrap"
+                               Text="Throw.Launcher.exe · ThrowData portable profile · Ctrl + Alt + Space to open on a fresh profile." />
+                </StackPanel>
+            </Border>
 
             <Border Style="{StaticResource ThrowSettingCard}">
                 <Grid>
                     <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                     <StackPanel Margin="0 0 20 0">
-                        <TextBlock Style="{StaticResource ThrowSectionTitle}" Text="Keep it light" />
+                        <TextBlock Style="{StaticResource ThrowSectionTitle}" Text="Lite mode · recommended default" />
                         <TextBlock Style="{StaticResource ThrowDescription}"
                                    Text="Use a smaller icon cache and fewer animations. Restart Throw after changing this." />
                     </StackPanel>
@@ -36,6 +44,17 @@
                     </Style>
                 </TextBlock.Style>
             </TextBlock>
+            <Border Style="{StaticResource ThrowSettingCard}">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource ThrowSectionTitle}" Text="Memory &amp; startup policy" />
+                    <TextBlock Style="{StaticResource ThrowDescription}" Text="These choices apply after restart. A smaller cache is not a guaranteed RAM limit." />
+                    <TextBlock Margin="0 14 0 6" Text="Cached icons" />
+                    <ComboBox HorizontalAlignment="Left" MinWidth="120"
+                              ItemsSource="{Binding LiteIconCacheSizes}" SelectedItem="{Binding Settings.LiteIconCacheCapacity}" />
+                    <CheckBox Margin="0 14 0 8" Content="Preload recently used icons" IsChecked="{Binding Settings.LitePreloadImages}" />
+                    <CheckBox Content="Wait until first use to load compatible plugins" IsChecked="{Binding Settings.LiteDeferPlugins}" />
+                </StackPanel>
+            </Border>
             <Border Style="{StaticResource ThrowSettingCard}">
                 <Grid>
                     <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
@@ -95,6 +114,16 @@
                     <TextBlock Style="{StaticResource ThrowDescription}" Text="{Binding ReportActionStatus}" />
                 </StackPanel>
             </Expander>
+            <Border Style="{StaticResource ThrowSettingCard}" Margin="0 24 0 0">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource ThrowSectionTitle}" Text="Bring a few preferences, not the whole app" />
+                    <TextBlock Style="{StaticResource ThrowDescription}" Text="{Binding ImportStatus}" />
+                    <Button Margin="0 14 0 0" HorizontalAlignment="Left" Content="Import general preferences…"
+                            Command="{Binding ImportPreferencesCommand}" />
+                    <TextBlock Style="{StaticResource ThrowDescription}" Margin="0 12 0 0"
+                               Text="Only hide-on-startup, hide-on-focus-loss, animation preference and accent matching are supported. Review before applying; your saved Throw settings are backed up." />
+                </StackPanel>
+            </Border>
         </StackPanel>
     </ui:ScrollViewerEx>
 </ui:Page>

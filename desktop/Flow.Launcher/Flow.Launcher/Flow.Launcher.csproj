@@ -2,6 +2,8 @@
   
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
+    <AssemblyName>Throw.Launcher</AssemblyName>
+    <RootNamespace>Flow.Launcher</RootNamespace>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>false</UseWindowsForms>
     <StartupObject>Flow.Launcher.App</StartupObject>
@@ -199,7 +201,7 @@
   </ItemGroup>
 
   <Target Name="PreBuild" BeforeTargets="PreBuildEvent" Condition="'$(OS)' == 'Windows_NT' and '$(SkipLauncherTermination)' != 'true'">
-    <Exec Command="taskkill /f /fi &quot;IMAGENAME eq Flow.Launcher.exe&quot;" />
+    <Exec Command="taskkill /f /fi &quot;IMAGENAME eq Throw.Launcher.exe&quot;" />
   </Target>
   
   <Target Name="RemoveDuplicateAnalyzers" BeforeTargets="CoreCompile">

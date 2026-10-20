@@ -6,8 +6,11 @@ namespace Flow.Launcher.Infrastructure
 {
     public static class Constant
     {
-        public const string FlowLauncher = "Flow.Launcher";
+        // Legacy constant name is kept for plugin API compatibility; its value
+        // identifies this independent application's executable and registrations.
+        public const string FlowLauncher = "Throw.Launcher";
         public const string FlowLauncherFullName = "Throw Launcher";
+        public static readonly bool SupportsAutomaticAppUpdates = false;
         public const string Plugins = "Plugins";
         public const string PluginMetadataFileName = "plugin.json";
 
