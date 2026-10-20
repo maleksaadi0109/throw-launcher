@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Threading;
 using System.Threading.Tasks;
@@ -10,21 +12,34 @@ namespace Flow.Launcher.Core.Plugin;
 /// </summary>
 internal sealed class DeferredPluginInitialization
 {
-    private readonly Lazy<Task<bool>> _initialization;
+    private readonly object _gate = new();
+    private readonly Func<Task<bool>> _initialize;
+    private Task<bool>? _initialization;
 
     public DeferredPluginInitialization(Func<Task<bool>> initialize)
     {
         ArgumentNullException.ThrowIfNull(initialize);
-        _initialization = new Lazy<Task<bool>>(
-            () => Task.Run(initialize), LazyThreadSafetyMode.ExecutionAndPublication);
+        _initialize = initialize;
     }
 
-    public Task<bool> CompletionIfStarted =>
-        _initialization.IsValueCreated ? _initialization.Value : Task.FromResult(false);
+    public Task<bool> CompletionIfStarted
+    {
+        get
+        {
+            lock (_gate)
+                return _initialization ?? Task.FromResult(false);
+        }
+    }
 
     public Task<bool> WaitAsync(CancellationToken token = default)
     {
         token.ThrowIfCancellationRequested();
-        return _initialization.Value.WaitAsync(token);
+        Task<bool> initialization;
+        lock (_gate)
+        {
+            // Queue the factory without running plugin code under this lock.
+            initialization = _initialization ??= Task.Run(_initialize);
+        }
+        return initialization.WaitAsync(token);
     }
 }
