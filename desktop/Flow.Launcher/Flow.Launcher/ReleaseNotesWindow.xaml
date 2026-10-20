@@ -1,0 +1,109 @@
+﻿<Window
+    x:Class="Flow.Launcher.ReleaseNotesWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:cc="clr-namespace:Flow.Launcher.Resources.Controls"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:local="clr-namespace:Flow.Launcher"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:mdxam="clr-namespace:MdXaml;assembly=MdXaml"
+    xmlns:ui="http://schemas.inkore.net/lib/ui/wpf/modern"
+    xmlns:vm="clr-namespace:Flow.Launcher.ViewModel"
+    Title="{DynamicResource releaseNotes}"
+    Width="940"
+    Height="600"
+    MinWidth="940"
+    MinHeight="600"
+    Background="{DynamicResource PopuBGColor}"
+    Closed="Window_Closed"
+    DataContext="{Binding RelativeSource={RelativeSource Self}}"
+    Foreground="{DynamicResource PopupTextColor}"
+    Loaded="Window_Loaded"
+    ResizeMode="CanResize"
+    WindowStartupLocation="CenterScreen"
+    mc:Ignorable="d">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="32" ResizeBorderThickness="{x:Static SystemParameters.WindowResizeBorderThickness}" />
+    </WindowChrome.WindowChrome>
+    <Window.InputBindings>
+        <KeyBinding Key="Escape" Command="Close" />
+    </Window.InputBindings>
+    <Window.CommandBindings>
+        <CommandBinding Command="Close" Executed="OnCloseExecuted" />
+    </Window.CommandBindings>
+
+    <Grid>
+        <Border Style="{StaticResource WindowMainPanelStyle}">
+            <Grid Background="{DynamicResource Color01B}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="32" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <cc:CustomWindowTitleBar Grid.Row="0" />
+
+                <ui:HyperlinkButton
+                    Grid.Row="1"
+                    Margin="6 0 18 0"
+                    x:Name="SeeMore"
+                    Content="{DynamicResource seeMoreReleaseNotes}"
+                    NavigateUri="{Binding ReleaseNotes}" />
+
+                <!--  Do not use scroll function of MarkdownViewer because it does not support smooth scroll  -->
+                <ui:ScrollViewerEx
+                    x:Name="MarkdownScrollViewer"
+                    Grid.Row="2"
+                    Height="500"
+                    Margin="15 0 0 0"
+                    Padding="0 0 15 0"
+                    HorizontalAlignment="Stretch">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <!--  This row is for bottom margin  -->
+                            <RowDefinition Height="20" />
+                        </Grid.RowDefinitions>
+                        <mdxam:MarkdownScrollViewer
+                            x:Name="MarkdownViewer"
+                            Grid.Row="0"
+                            HorizontalAlignment="Stretch"
+                            VerticalAlignment="Stretch"
+                            ClickAction="SafetyDisplayWithRelativePath"
+                            HorizontalScrollBarVisibility="Disabled"
+                            Loaded="MarkdownViewer_Loaded"
+                            MouseWheel="MarkdownViewer_MouseWheel"
+                            Plugins="{StaticResource MdXamlPlugins}"
+                            PreviewMouseWheel="MarkdownViewer_PreviewMouseWheel"
+                            VerticalScrollBarVisibility="Disabled"
+                            Visibility="Collapsed" />
+                    </Grid>
+                </ui:ScrollViewerEx>
+
+                <!--  This Grid is for display progress ring and refresh button.  -->
+                <!--  And it is also for changing the size of the MarkdownViewer.  -->
+                <!--  Because VerticalAlignment="Stretch" can cause height issue with MarkdownScrollViewer.  -->
+                <Grid
+                    Grid.Row="2"
+                    Margin="15 0 20 0"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Stretch"
+                    SizeChanged="Grid_SizeChanged">
+                    <ui:ProgressRing
+                        x:Name="RefreshProgressRing"
+                        Width="32"
+                        Height="32"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        IsActive="True" />
+                    <Button
+                        x:Name="RefreshButton"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Click="RefreshButton_Click"
+                        Content="{DynamicResource refresh}"
+                        Visibility="Collapsed" />
+                </Grid>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

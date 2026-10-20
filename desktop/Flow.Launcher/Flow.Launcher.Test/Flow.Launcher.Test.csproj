@@ -1,0 +1,70 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <ProjectGuid>{FF742965-9A80-41A5-B042-D6C7D3A21708}</ProjectGuid>
+    <OutputType>Library</OutputType>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AppDesignerFolder>Properties</AppDesignerFolder>
+    <RootNamespace>Flow.Launcher.Test</RootNamespace>
+    <AssemblyName>Flow.Launcher.Test</AssemblyName>
+    <ApplicationIcon />
+    <StartupObject />
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+  
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>portable</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+    <Prefer32Bit>false</Prefer32Bit>
+  </PropertyGroup>
+  
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+    <Prefer32Bit>false</Prefer32Bit>
+  </PropertyGroup>
+  
+  <ItemGroup>
+    <Compile Include="..\SolutionAssemblyInfo.cs" Link="Properties\SolutionAssemblyInfo.cs" />
+  </ItemGroup>
+  
+  <ItemGroup>
+    <ProjectReference Include="..\Flow.Launcher\Flow.Launcher.csproj" />
+    <ProjectReference Include="..\Plugins\Flow.Launcher.Plugin.Calculator\Flow.Launcher.Plugin.Calculator.csproj" />
+    <ProjectReference Include="..\Plugins\Flow.Launcher.Plugin.Explorer\Flow.Launcher.Plugin.Explorer.csproj" />
+    <ProjectReference Include="..\Plugins\Flow.Launcher.Plugin.PluginsManager\Flow.Launcher.Plugin.PluginsManager.csproj" />
+    <ProjectReference Include="..\Plugins\Flow.Launcher.Plugin.Program\Flow.Launcher.Plugin.Program.csproj" />
+    <ProjectReference Include="..\Plugins\Flow.Launcher.Plugin.Shell\Flow.Launcher.Plugin.Shell.csproj" />
+    <ProjectReference Include="..\Plugins\Flow.Launcher.Plugin.Url\Flow.Launcher.Plugin.Url.csproj" />
+    <ProjectReference Include="..\Flow.Launcher.Core\Flow.Launcher.Core.csproj" />
+    <ProjectReference Include="..\Flow.Launcher.Infrastructure\Flow.Launcher.Infrastructure.csproj" Aliases="global,Infrastructure" />
+    <ProjectReference Include="..\Flow.Launcher.Plugin\Flow.Launcher.Plugin.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Moq" Version="4.20.72" />
+    <PackageReference Include="nunit" Version="4.4.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="5.1.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\Flow.Launcher\Images\*.*" Link="Images\%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

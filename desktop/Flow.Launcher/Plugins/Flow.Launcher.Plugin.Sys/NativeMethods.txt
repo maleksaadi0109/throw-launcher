@@ -1,0 +1,13 @@
+﻿ExitWindowsEx
+LockWorkStation
+SHEmptyRecycleBin
+S_OK
+E_UNEXPECTED
+SetSuspendState
+GetPwrCapabilities
+OpenProcessToken
+WIN32_ERROR
+LookupPrivilegeValue
+AdjustTokenPrivileges
+TOKEN_PRIVILEGES
+SE_SHUTDOWN_NAME

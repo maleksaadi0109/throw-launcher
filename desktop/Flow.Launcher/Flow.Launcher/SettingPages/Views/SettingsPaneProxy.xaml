@@ -1,0 +1,77 @@
+﻿<ui:Page
+    x:Class="Flow.Launcher.SettingPages.Views.SettingsPaneProxy"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:cc="clr-namespace:Flow.Launcher.Resources.Controls"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:ikw="http://schemas.inkore.net/lib/ui/wpf"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:sys="clr-namespace:System;assembly=mscorlib"
+    xmlns:ui="http://schemas.inkore.net/lib/ui/wpf/modern"
+    xmlns:viewModels="clr-namespace:Flow.Launcher.SettingPages.ViewModels"
+    Title="Proxy"
+    d:DataContext="{d:DesignInstance viewModels:SettingsPaneProxyViewModel}"
+    d:DesignHeight="450"
+    d:DesignWidth="800"
+    mc:Ignorable="d">
+    <Page.Resources>
+        <ResourceDictionary Source="pack://application:,,,/Resources/SettingWindowStyle.xaml" />
+    </Page.Resources>
+    <ui:ScrollViewerEx
+        FontSize="14"
+        VirtualizingStackPanel.IsVirtualizing="True"
+        VirtualizingStackPanel.ScrollUnit="Pixel">
+
+        <StackPanel Margin="5 0 24 0">
+            <TextBlock
+                Margin="0 23 0 10"
+                FontSize="30"
+                Style="{StaticResource PageTitle}"
+                Text="{DynamicResource proxy}"
+                TextAlignment="left" />
+
+            <ui:SettingsCard Header="{DynamicResource enableProxy}">
+                <ui:ToggleSwitch
+                    IsOn="{Binding Settings.Proxy.Enabled}"
+                    OffContent="{DynamicResource disable}"
+                    OnContent="{DynamicResource enable}" />
+            </ui:SettingsCard>
+
+            <ui:SettingsCard Margin="0 4 0 0" Header="{DynamicResource server}">
+                <TextBox
+                    Width="300"
+                    IsEnabled="{Binding Settings.Proxy.Enabled}"
+                    Text="{Binding Settings.Proxy.Server}" />
+            </ui:SettingsCard>
+
+            <ui:SettingsCard Margin="0 4 0 0" Header="{DynamicResource port}">
+                <TextBox
+                    Width="100"
+                    IsEnabled="{Binding Settings.Proxy.Enabled}"
+                    Text="{Binding Settings.Proxy.Port, TargetNullValue={x:Static sys:String.Empty}}" />
+            </ui:SettingsCard>
+
+            <ui:SettingsCard Margin="0 4 0 0" Header="{DynamicResource userName}">
+                <TextBox
+                    Width="200"
+                    IsEnabled="{Binding Settings.Proxy.Enabled}"
+                    Text="{Binding Settings.Proxy.UserName}" />
+            </ui:SettingsCard>
+
+            <ui:SettingsCard Margin="0 4 0 0" Header="{DynamicResource password}">
+                <TextBox
+                    Width="200"
+                    IsEnabled="{Binding Settings.Proxy.Enabled}"
+                    Text="{Binding Settings.Proxy.Password}" />
+            </ui:SettingsCard>
+
+            <ui:SettingsCard Margin="0 14 0 0" Header="{DynamicResource testProxy}">
+                <Button
+                    Width="150"
+                    Command="{Binding TestProxyClickedCommand}"
+                    Content="{DynamicResource testProxy}"
+                    IsEnabled="{Binding Settings.Proxy.Enabled}" />
+            </ui:SettingsCard>
+        </StackPanel>
+    </ui:ScrollViewerEx>
+</ui:Page>

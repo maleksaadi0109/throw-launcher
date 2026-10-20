@@ -1,0 +1,1603 @@
+﻿using System;
+using System.ComponentModel;
+using System.Linq;
+using System.Media;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
+using System.Windows.Input;
+using System.Windows.Interop;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Shapes;
+using System.Windows.Shell;
+using System.Windows.Threading;
+using CommunityToolkit.Mvvm.DependencyInjection;
+using Flow.Launcher.Core.Plugin;
+using Flow.Launcher.Core.Resource;
+using Flow.Launcher.Infrastructure;
+using Flow.Launcher.Infrastructure.Hotkey;
+using Flow.Launcher.Infrastructure.DialogJump;
+using Flow.Launcher.Infrastructure.UserSettings;
+using Flow.Launcher.Plugin;
+using Flow.Launcher.Plugin.SharedCommands;
+using Flow.Launcher.Plugin.SharedModels;
+using Flow.Launcher.Resources.Controls;
+using Flow.Launcher.ViewModel;
+using iNKORE.UI.WPF.Modern;
+using iNKORE.UI.WPF.Modern.Controls;
+using DataObject = System.Windows.DataObject;
+using Key = System.Windows.Input.Key;
+using MouseButtons = System.Windows.Forms.MouseButtons;
+using NotifyIcon = System.Windows.Forms.NotifyIcon;
+
+namespace Flow.Launcher
+{
+    public partial class MainWindow : IDisposable
+    {
+        #region Public Property
+
+        // Window Event: Close Event
+        public bool CanClose { get; set; } = false;
+
+        #endregion
+
+        #region Private Fields
+
+        // Class Name
+        private static readonly string ClassName = nameof(MainWindow);
+
+        // Dependency Injection
+        private readonly Settings _settings;
+        private readonly Theme _theme;
+
+        // Window Notify Icon
+        private NotifyIcon _notifyIcon;
+
+        // Window Context Menu
+        private readonly ContextMenu _contextMenu = new();
+        private readonly MainViewModel _viewModel;
+
+        // Window Event: Key Event
+        private bool _isArrowKeyPressed = false;
+
+        // Window Sound Effects
+        private MediaPlayer _animationSoundWMP;
+        private SoundPlayer _animationSoundWPF;
+        private readonly Lock _soundLock = new();
+
+        // Window WndProc
+        private HwndSource _hwndSource;
+        private int _initialWidth;
+        private int _initialHeight;
+
+        // Window Animation
+        private const double DefaultRightMargin = 66; //* this value from base.xaml
+        private bool _isClockPanelAnimating = false;
+        private Storyboard _progressBarStoryboard;
+
+        // IDisposable
+        private bool _disposed = false;
+
+        #endregion
+
+        #region Constructor
+
+        public MainWindow()
+        {
+            _settings = Ioc.Default.GetRequiredService<Settings>();
+            _theme = Ioc.Default.GetRequiredService<Theme>();
+            _viewModel = Ioc.Default.GetRequiredService<MainViewModel>();
+            DataContext = _viewModel;
+
+            Topmost = _settings.ShowAtTopmost;
+
+            InitializeComponent();
+            UpdatePosition();
+
+            SyncSoundEffectsState();
+            RegisterSoundEffectsEvent();
+            DataObject.AddPastingHandler(QueryTextBox, QueryTextBox_OnPaste);
+            _viewModel.ActualApplicationThemeChanged += ViewModel_ActualApplicationThemeChanged;
+        }
+
+        #endregion
+
+        #region Window Event
+
+#pragma warning disable VSTHRD100 // Avoid async void methods
+
+        private void ViewModel_ActualApplicationThemeChanged(object sender, ActualApplicationThemeChangedEventArgs args)
+        {
+            // Keep the markdown preview's "Auto" code-highlight theme in step with the app colour scheme.
+            PreviewMarkdownScrollViewer.ApplyCodeHighlightTheme(_settings.CodeHighlightTheme, args.IsDark);
+            _ = _theme.RefreshFrameAsync();
+        }
+
+        private void OnSourceInitialized(object sender, EventArgs e)
+        {
+            var handle = Win32Helper.GetWindowHandle(this, true);
+            _hwndSource = HwndSource.FromHwnd(handle);
+            _hwndSource.AddHook(WndProc);
+            Win32Helper.HideFromAltTab(this);
+            Win32Helper.DisableControlBox(this);
+        }
+
+        private void OnLoaded(object sender, RoutedEventArgs e)
+        {
+            // Check first launch
+            if (_settings.FirstLaunch)
+            {
+                // Set First Launch to false
+                _settings.FirstLaunch = false;
+
+                // Update release notes version
+                _settings.ReleaseNotesVersion = Constant.Version;
+
+                // Set Backdrop Type to Acrylic for Windows 11 when First Launch. Default is None
+                if (Win32Helper.IsBackdropSupported()) _settings.BackdropType = BackdropTypes.Acrylic;
+
+                // Save settings
+                App.API.SaveAppAllSettings();
+
+                // Show Welcome Window
+                var welcomeWindow = new WelcomeWindow();
+                welcomeWindow.Show();
+            }
+
+            if (Constant.Version != "1.0.0" && _settings.ReleaseNotesVersion != Constant.Version) // Skip release notes notification for developer builds (version 1.0.0)
+            {
+                // Update release notes version
+                _settings.ReleaseNotesVersion = Constant.Version;
+                // Show release note popup with button
+                App.API.ShowMsgWithButton(
+                    Localize.appUpdateTitle(Constant.Version),
+                    Localize.appUpdateButtonContent(),
+                    () =>
+                    {
+                        Application.Current.Dispatcher.Invoke(() =>
+                        {
+                            var releaseNotesWindow = new ReleaseNotesWindow();
+                            releaseNotesWindow.Show();
+                        });
+                    });
+            }
+
+            // Initialize place holder
+            SetupPlaceholderText();
+            _viewModel.PlaceholderText = _settings.PlaceholderText;
+
+            // Hide window if need
+            UpdatePosition();
+            if (_settings.HideOnStartup)
+            {
+                _viewModel.Hide();
+                _viewModel.InitializeVisibilityStatus(false);
+            }
+            else
+            {
+                _viewModel.Show();
+                _viewModel.InitializeVisibilityStatus(true);
+                // When HideOnStartup is off and UseAnimation is on,
+                // there was a bug where the clock would not appear at all on the initial launch
+                // So we need to forcibly trigger animation here to ensure the clock is visible
+                if (_settings.EffectiveUseAnimation)
+                {
+                    WindowAnimation();
+                }
+            }
+
+            // Initialize context menu & notify icon
+            InitializeContextMenu();
+            InitializeNotifyIcon();
+
+            // Initialize color scheme
+            if (_settings.ColorScheme == Constant.Light)
+            {
+                ThemeManager.Current.ApplicationTheme = ApplicationTheme.Light;
+            }
+            else if (_settings.ColorScheme == Constant.Dark)
+            {
+                ThemeManager.Current.ApplicationTheme = ApplicationTheme.Dark;
+            }
+
+            // Initialize the markdown preview code-highlight theme from settings, resolving "Auto"
+            // against the colour scheme just applied above.
+            PreviewMarkdownScrollViewer.ApplyCodeHighlightTheme(
+                _settings.CodeHighlightTheme,
+                ThemeManager.Current.ActualApplicationTheme == ApplicationTheme.Dark);
+
+            // Force update position
+            UpdatePosition();
+
+            // Initialize resize mode after refreshing frame
+            SetupResizeMode();
+
+            // Reset preview
+            // Can't await in sync startup code; fire-and-forget but safely log any failure
+            _ = _viewModel.ResetPreviewAsync().ContinueWith(static t =>
+                    App.API.LogError(ClassName, $"ResetPreviewAsync failed: {t.Exception}"),
+                CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+
+            // Since the default main window visibility is visible, so we need set focus during startup
+            QueryTextBox.Focus();
+
+            // When the window is shown on startup, focusing QueryTextBox is not enough: the window also
+            // has to be activated to actually take OS-level keyboard focus. Otherwise, when Flow Launcher
+            // is auto-started with Windows (Startup folder or logon task), the search box looks focused but
+            // keystrokes go elsewhere until the user clicks it.
+            // This is dispatched at Loaded priority because Activate() throws if the window has not finished
+            // being shown yet, and skipped entirely when the window starts hidden for the same reason.
+            if (!_settings.HideOnStartup)
+            {
+                _ = Dispatcher.BeginInvoke((() =>
+                {
+                    if (!_viewModel.MainWindowVisibilityStatus) return;
+                    Activate();
+                    QueryTextBox.Focus();
+                }), DispatcherPriority.Loaded);
+            }
+
+            // Set the initial state of the QueryTextBoxCursorMovedToEnd property
+            // Without this part, when shown for the first time, switching the context menu does not move the cursor to the end.
+            _viewModel.QueryTextCursorMovedToEnd = false;
+
+            // Register Dialog Jump events
+            InitializeDialogJump();
+
+            // View model property changed event
+            _viewModel.PropertyChanged += (o, e) =>
+            {
+                switch (e.PropertyName)
+                {
+                    case nameof(MainViewModel.MainWindowVisibilityStatus):
+                        {
+                            Dispatcher.Invoke(() =>
+                            {
+                                if (_viewModel.MainWindowVisibilityStatus)
+                                {
+                                    // Play sound effect before activing the window
+                                    if (_settings.UseSound && !_viewModel.IsDialogJumpWindowUnderDialog())
+                                    {
+                                        SoundPlay();
+                                    }
+
+                                    // Update position & Activate
+                                    UpdatePosition();
+                                    Activate();
+
+                                    // Reset preview
+                                    // Can't await in Dispatcher.Invoke; fire-and-forget but safely log any failure
+                                    _ = _viewModel.ResetPreviewAsync().ContinueWith(static t =>
+                                            App.API.LogError(ClassName, $"ResetPreviewAsync failed: {t.Exception}"),
+                                        CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+
+                                    // Select last query if need
+                                    if (!_viewModel.LastQuerySelected)
+                                    {
+                                        QueryTextBox.SelectAll();
+                                        _viewModel.LastQuerySelected = true;
+                                    }
+
+                                    // Focus query box
+                                    QueryTextBox.Focus();
+
+                                    // Play window animation
+                                    if (_settings.EffectiveUseAnimation && !_viewModel.IsDialogJumpWindowUnderDialog())
+                                    {
+                                        WindowAnimation();
+                                    }
+
+                                    // Update activate times
+                                    _settings.ActivateTimes++;
+                                }
+                            });
+                            break;
+                        }
+                    case nameof(MainViewModel.QueryTextCursorMovedToEnd):
+                        if (_viewModel.QueryTextCursorMovedToEnd)
+                        {
+                            // QueryTextBox seems to be update with a DispatcherPriority as low as ContextIdle.
+                            // To ensure QueryTextBox is up to date with QueryText from the View, we need to Dispatch with such a priority
+                            Dispatcher.Invoke(() => QueryTextBox.CaretIndex = QueryTextBox.Text.Length);
+                            _viewModel.QueryTextCursorMovedToEnd = false;
+                        }
+                        break;
+                    case nameof(MainViewModel.GameModeStatus):
+                        _notifyIcon.Icon = _viewModel.GameModeStatus
+                            ? Properties.Resources.gamemode
+                            : Properties.Resources.app;
+                        break;
+                }
+            };
+
+            // Settings property changed event
+            _settings.PropertyChanged += (o, e) =>
+            {
+                switch (e.PropertyName)
+                {
+                    case nameof(Settings.HideNotifyIcon):
+                        _notifyIcon.Visible = !_settings.HideNotifyIcon;
+                        break;
+                    case nameof(Settings.Language):
+                        UpdateNotifyIconText();
+                        if (_settings.ShowHomePage && _viewModel.QueryResultsSelected() && string.IsNullOrEmpty(_viewModel.QueryText))
+                        {
+                            _viewModel.QueryResults();
+                        }
+                        break;
+                    case nameof(Settings.Hotkey):
+                        UpdateNotifyIconText();
+                        break;
+                    case nameof(Settings.WindowLeft):
+                        Left = _settings.WindowLeft;
+                        break;
+                    case nameof(Settings.WindowTop):
+                        Top = _settings.WindowTop;
+                        break;
+                    case nameof(Settings.ShowPlaceholder):
+                        SetupPlaceholderText();
+                        break;
+                    case nameof(Settings.PlaceholderText):
+                        _viewModel.PlaceholderText = _settings.PlaceholderText;
+                        break;
+                    case nameof(Settings.KeepMaxResults):
+                        SetupResizeMode();
+                        break;
+                    case nameof(Settings.SettingWindowFont):
+                        InitializeContextMenu();
+                        break;
+                    case nameof(Settings.ShowHomePage):
+                    case nameof(Settings.ShowHistoryResultsForHomePage):
+                    case nameof(Settings.HistoryStyle):
+                        if (_viewModel.QueryResultsSelected() && string.IsNullOrEmpty(_viewModel.QueryText))
+                        {
+                            _viewModel.QueryResults();
+                        }
+                        break;
+                    case nameof(Settings.ShowAtTopmost):
+                        Topmost = _settings.ShowAtTopmost;
+                        break;
+                    case nameof(Settings.UseSound):
+                        SyncSoundEffectsState();
+                        break;
+                }
+            };
+
+            // QueryTextBox.Text change detection (modified to only work when character count is 1 or higher)
+            QueryTextBox.TextChanged += (s, e) => UpdateClockPanelVisibility();
+
+            // Detecting ResultContextMenu.Visibility changes
+            DependencyPropertyDescriptor
+                .FromProperty(VisibilityProperty, typeof(ResultListBox))
+                .AddValueChanged(ResultContextMenu, (s, e) => UpdateClockPanelVisibility());
+
+            // Detect History.Visibility changes
+            DependencyPropertyDescriptor
+                .FromProperty(VisibilityProperty, typeof(ResultListBox))
+                .AddValueChanged(History, (s, e) => UpdateClockPanelVisibility());
+
+            // Initialize query state
+            if ((_settings.ShowHomePage || _settings.ShowHistoryResultsForHomePage) && string.IsNullOrEmpty(_viewModel.QueryText))
+            {
+                _viewModel.QueryResults();
+            }
+        }
+
+        private void ProgressBar_Loaded(object sender, RoutedEventArgs e)
+        {
+            InitProgressbarAnimation();
+        }
+
+        private async void OnClosing(object sender, CancelEventArgs e)
+        {
+            if (!CanClose)
+            {
+                CanClose = true;
+                _notifyIcon.Visible = false;
+                App.API.SaveAppAllSettings();
+                e.Cancel = true;
+                await PluginManager.DisposePluginsAsync();
+                Notification.Uninstall();
+                // After plugins are all disposed, we shutdown application to close app
+                // We use this instead of Close() to avoid InvalidOperationException when calling Close() in OnClosing event
+                Application.Current.Shutdown();
+            }
+        }
+
+        private void OnClosed(object sender, EventArgs e)
+        {
+            try
+            {
+                _hwndSource.RemoveHook(WndProc);
+            }
+            catch (Exception)
+            {
+                // Ignored
+            }
+
+            _hwndSource = null;
+        }
+
+        private void OnLocationChanged(object sender, EventArgs e)
+        {
+            if (_viewModel.IsDialogJumpWindowUnderDialog())
+            {
+                return;
+            }
+
+            if (IsLoaded)
+            {
+                _settings.WindowLeft = Left;
+                _settings.WindowTop = Top;
+            }
+        }
+
+        private async void OnDeactivated(object sender, EventArgs e)
+        {
+            if (_viewModel.IsDialogJumpWindowUnderDialog())
+            {
+                return;
+            }
+
+            _settings.WindowLeft = Left;
+            _settings.WindowTop = Top;
+
+            _viewModel.ClockPanelOpacity = 0.0;
+            _viewModel.SearchIconOpacity = 0.0;
+
+            // This condition stops extra hide call when animator is on,
+            // which causes the toggling to occasional hide instead of show.
+            if (_viewModel.MainWindowVisibilityStatus)
+            {
+                // Need time to initialize the main query window animation.
+                // This also stops the mainwindow from flickering occasionally after Settings window is opened
+                // and always after Settings window is closed.
+                if (_settings.EffectiveUseAnimation)
+                {
+                    await Task.Delay(100);
+                }
+
+                if (_settings.HideWhenDeactivated && !_viewModel.ExternalPreviewVisible)
+                {
+                    _viewModel.Hide();
+                }
+            }
+        }
+
+        private void OnKeyDown(object sender, KeyEventArgs e)
+        {
+            // When a code-block in the markdown preview is focused
+            // Let it capture input of text navigation keys (arrows, page, home/end) instead
+            // Non-navigation keys pass through normally.
+            if (PreviewMarkdownScrollViewer.IsCodeBlockFocused(e.OriginalSource)
+                && PreviewMarkdownScrollViewer.IsCodeBlockNavigationKey(e.Key))
+            {
+                return;
+            }
+
+            var specialKeyState = GlobalHotkey.CheckModifiers();
+            switch (e.Key)
+            {
+                case Key.Down:
+                    _isArrowKeyPressed = true;
+                    _viewModel.SelectNextItemCommand.Execute(null);
+                    e.Handled = true;
+                    break;
+                case Key.Up:
+                    _isArrowKeyPressed = true;
+                    _viewModel.SelectPrevItemCommand.Execute(null);
+                    e.Handled = true;
+                    break;
+                case Key.PageDown:
+                    _viewModel.SelectNextPageCommand.Execute(null);
+                    e.Handled = true;
+                    break;
+                case Key.PageUp:
+                    _viewModel.SelectPrevPageCommand.Execute(null);
+                    e.Handled = true;
+                    break;
+                case Key.Right:
+                    if ((_viewModel.QueryResultsSelected() || _viewModel.HistorySelected())
+                        && QueryTextBox.CaretIndex == QueryTextBox.Text.Length)
+                    {
+                        _viewModel.ToggleContextMenuCommand.Execute(null);
+                        e.Handled = true;
+                    }
+                    break;
+                case Key.Left:
+                    if (!_viewModel.QueryResultsSelected() && QueryTextBox.CaretIndex == 0)
+                    {
+                        _viewModel.EscCommand.Execute(null);
+                        e.Handled = true;
+                    }
+                    break;
+                case Key.Back:
+                    if (specialKeyState.CtrlPressed)
+                    {
+                        if (_viewModel.QueryResultsSelected()
+                            && QueryTextBox.Text.Length > 0
+                            && QueryTextBox.CaretIndex == QueryTextBox.Text.Length)
+                        {
+                            var queryWithoutActionKeyword =
+                                QueryBuilder.Build(QueryTextBox.Text, QueryTextBox.Text.Trim(), PluginManager.GetNonGlobalPlugins())?.Search;
+
+                            if (FilesFolders.IsLocationPathString(queryWithoutActionKeyword))
+                            {
+                                _viewModel.BackspaceCommand.Execute(null);
+                                e.Handled = true;
+                            }
+                        }
+                    }
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        private void OnKeyUp(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Up || e.Key == Key.Down)
+            {
+                _isArrowKeyPressed = false;
+            }
+        }
+
+        private void OnPreviewMouseMove(object sender, MouseEventArgs e)
+        {
+            if (_isArrowKeyPressed)
+            {
+                e.Handled = true; // Ignore Mouse Hover when press Arrowkeys
+            }
+        }
+
+#pragma warning restore VSTHRD100 // Avoid async void methods
+
+        #endregion
+
+        #region Window Boarder Event
+
+        private void OnMouseDown(object sender, MouseButtonEventArgs e)
+        {
+            // When the window is maximized via Snap,
+            // dragging attempts will first switch the window from Maximized to Normal state,
+            // and adjust the drag position accordingly.
+            if (e.ChangedButton == MouseButton.Left)
+            {
+                try
+                {
+                    if (WindowState == WindowState.Maximized)
+                    {
+                        // Calculate ratio based on maximized window dimensions
+                        double maxWidth = ActualWidth;
+                        double maxHeight = ActualHeight;
+                        var mousePos = e.GetPosition(this);
+                        double xRatio = mousePos.X / maxWidth;
+                        double yRatio = mousePos.Y / maxHeight;
+
+                        // Current monitor information
+                        var screen = MonitorInfo.GetNearestDisplayMonitor(new WindowInteropHelper(this).Handle);
+                        var workingArea = screen.WorkingArea;
+                        var screenLeftTop = Win32Helper.TransformPixelsToDIP(this, workingArea.X, workingArea.Y);
+
+                        // Switch to Normal state
+                        WindowState = WindowState.Normal;
+
+                        Application.Current?.Dispatcher.Invoke(new Action(() =>
+                        {
+                            double normalWidth = Width;
+                            double normalHeight = Height;
+
+                            // Apply ratio based on the difference between maximized and normal window sizes
+                            Left = screenLeftTop.X + (maxWidth - normalWidth) * xRatio;
+                            Top = screenLeftTop.Y + (maxHeight - normalHeight) * yRatio;
+
+                            if (Mouse.LeftButton == MouseButtonState.Pressed)
+                            {
+                                DragMove();
+                            }
+                        }), DispatcherPriority.ApplicationIdle);
+                    }
+                    else
+                    {
+                        DragMove();
+                    }
+                }
+                catch (InvalidOperationException)
+                {
+                    // Ignored - can occur if drag operation is already in progress
+                }
+            }
+        }
+
+        #endregion
+
+        #region Window Context Menu Event
+
+#pragma warning disable VSTHRD100 // Avoid async void methods
+
+        private async void OnContextMenusForSettingsClick(object sender, RoutedEventArgs e)
+        {
+            _viewModel.Hide();
+
+            if (_settings.EffectiveUseAnimation)
+                await Task.Delay(100);
+
+            App.API.OpenSettingDialog();
+        }
+
+#pragma warning restore VSTHRD100 // Avoid async void methods
+
+        #endregion
+
+        #region Window WndProc
+
+        private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled) 
+        {
+            switch (msg)
+            {
+                case Win32Helper.WM_ENTERSIZEMOVE:
+                    // Do do handle size move event for dialog jump window
+                    if (_viewModel.IsDialogJumpWindowUnderDialog())
+                    {
+                        return IntPtr.Zero;
+                    }
+
+                    _initialWidth = (int)Width;
+                    _initialHeight = (int)Height;
+                    handled = true;
+                    break;
+                case Win32Helper.WM_EXITSIZEMOVE:
+                    // Do do handle size move event for Dialog Jump window
+                    if (_viewModel.IsDialogJumpWindowUnderDialog())
+                    {
+                        return IntPtr.Zero;
+                    }
+
+                    //Prevent updating the number of results when the window height is below the height of a single result item.
+                    //This situation occurs not only when the user manually resizes the window, but also when the window is released from a side snap, as the OS automatically adjusts the window height.
+                    //(Without this check, releasing from a snap can cause the window height to hit the minimum, resulting in only 2 results being shown.)
+                    if (_initialHeight != (int)Height && Height > (_settings.WindowHeightSize + _settings.ItemHeightSize))
+                    {
+                        if (!_settings.KeepMaxResults)
+                        {
+                            // Get shadow margin
+                            var shadowMargin = 0;
+                            var (_, useDropShadowEffect) = _theme.GetActualValue();
+                            if (useDropShadowEffect)
+                            {
+                                shadowMargin = 32;
+                            }
+
+                            // Calculate max results to show
+                            var itemCount = (Height - (_settings.WindowHeightSize + 14) - shadowMargin) / _settings.ItemHeightSize;
+                            if (itemCount < 2)
+                            {
+                                _settings.MaxResultsToShow = 2;
+                            }
+                            else
+                            {
+                                _settings.MaxResultsToShow = Convert.ToInt32(Math.Truncate(itemCount));
+                            }
+                        }
+
+                        SizeToContent = SizeToContent.Height;
+                    }
+                    else
+                    {
+                        // Update height when exiting maximized snap state.
+                        SizeToContent = SizeToContent.Height;
+                    }
+
+                    if (_initialWidth != (int)Width)
+                    {
+                        if (!_settings.KeepMaxResults)
+                        {
+                            // Update width
+                            _viewModel.MainWindowWidth = Width;
+                        }
+
+                        SizeToContent = SizeToContent.Height;
+                    }
+
+                    handled = true;
+                    break;
+                case Win32Helper.WM_NCLBUTTONDBLCLK: // Block the double click in frame
+                    SizeToContent = SizeToContent.Height;
+                    handled = true;
+                    break;
+                case Win32Helper.WM_SYSCOMMAND: // Block Maximize/Minimize by Win+Up and Win+Down Arrow
+                    var command = wParam.ToInt32() & 0xFFF0;
+                    if (command == Win32Helper.SC_MAXIMIZE || command == Win32Helper.SC_MINIMIZE)
+                    {
+                        SizeToContent = SizeToContent.Height;
+                        handled = true;
+                    }
+                    break;
+            }
+
+            return IntPtr.Zero;
+        }
+
+        #endregion
+
+        #region Window Sound Effects
+
+        private void InitSoundEffects()
+        {
+            lock (_soundLock)
+            {
+                if (_settings.WMPInstalled)
+                {
+                    _animationSoundWMP?.Close();
+                    _animationSoundWMP = new MediaPlayer();
+                    _animationSoundWMP.Open(new Uri(AppContext.BaseDirectory + "Resources\\open.wav"));
+                }
+                else
+                {
+                    _animationSoundWPF?.Dispose();
+                    _animationSoundWPF = new SoundPlayer(AppContext.BaseDirectory + "Resources\\open.wav");
+                    _animationSoundWPF.Load();
+                }
+            }
+        }
+
+        private void SoundPlay()
+        {
+            lock (_soundLock)
+            {
+                if (_settings.WMPInstalled)
+                {
+                    if (_animationSoundWMP == null)
+                    {
+                        return;
+                    }
+
+                    _animationSoundWMP.Position = TimeSpan.Zero;
+                    _animationSoundWMP.Volume = _settings.SoundVolume / 100.0;
+                    _animationSoundWMP.Play();
+                }
+                else
+                {
+                    if (_animationSoundWPF == null)
+                    {
+                        return;
+                    }
+
+                    _animationSoundWPF.Play();
+                }
+            }
+        }
+
+        private bool IsSoundEffectsInitialized()
+        {
+            lock (_soundLock)
+            {
+                return _animationSoundWMP != null || _animationSoundWPF != null;
+            }
+        }
+
+        private void DisposeSoundEffects()
+        {
+            lock (_soundLock)
+            {
+                _animationSoundWMP?.Stop();
+                _animationSoundWMP?.Close();
+                _animationSoundWMP = null;
+
+                _animationSoundWPF?.Stop();
+                _animationSoundWPF?.Dispose();
+                _animationSoundWPF = null;
+            }
+        }
+
+        private void SyncSoundEffectsState(bool forceReinitializeWhenEnabled = false)
+        {
+            if (!_settings.UseSound)
+            {
+                if (IsSoundEffectsInitialized())
+                {
+                    DisposeSoundEffects();
+                }
+
+                return;
+            }
+
+            if (forceReinitializeWhenEnabled || !IsSoundEffectsInitialized())
+            {
+                InitSoundEffects();
+            }
+        }
+
+        private void RegisterSoundEffectsEvent()
+        {
+            // Fix for sound not playing after sleep / hibernate for both modern standby and legacy standby
+            // https://stackoverflow.com/questions/64805186/mediaplayer-doesnt-play-after-computer-sleeps
+            try
+            {
+                Win32Helper.RegisterSleepModeListener(() =>
+                {
+                    if (Application.Current == null)
+                    {
+                        return;
+                    }
+
+                    // We must run SyncSoundEffectsState on UI thread because MediaPlayer is a DispatcherObject
+                    if (!Application.Current.Dispatcher.CheckAccess())
+                    {
+                        Application.Current.Dispatcher.Invoke(() => SyncSoundEffectsState(forceReinitializeWhenEnabled: true));
+                        return;
+                    }
+
+                    SyncSoundEffectsState(forceReinitializeWhenEnabled: true);
+                });
+            }
+            catch (Exception e)
+            {
+                App.API.LogException(ClassName, "Failed to register sound effect event", e);
+            }
+        }
+
+        private static void UnregisterSoundEffectsEvent()
+        {
+            try
+            {
+                Win32Helper.UnregisterSleepModeListener();
+            }
+            catch (Exception e)
+            {
+                App.API.LogException(ClassName, "Failed to unregister sound effect event", e);
+            }
+        }
+
+        #endregion
+
+        #region Window Notify Icon
+
+        private void InitializeNotifyIcon()
+        {
+            _notifyIcon = new NotifyIcon
+            {
+                Text = Constant.FlowLauncherFullName,
+                Icon = Constant.Version == "1.0.0" ? Properties.Resources.dev : Properties.Resources.app,
+                Visible = !_settings.HideNotifyIcon
+            };
+
+            _notifyIcon.MouseClick += (o, e) =>
+            {
+                switch (e.Button)
+                {
+                    case MouseButtons.Left:
+                        _viewModel.ToggleFlowLauncher();
+                        break;
+                    case MouseButtons.Right:
+
+                        _contextMenu.IsOpen = true;
+                        // Get context menu handle and bring it to the foreground
+                        if (PresentationSource.FromVisual(_contextMenu) is HwndSource hwndSource)
+                        {
+                            Win32Helper.SetForegroundWindow(hwndSource.Handle);
+                        }
+
+                        _contextMenu.Focus();
+                        break;
+                }
+            };
+        }
+
+        private void UpdateNotifyIconText()
+        {
+            var menu = _contextMenu;
+            ((MenuItem)menu.Items[0]).Header = Localize.iconTrayOpen() +
+                                               " (" + _settings.Hotkey + ")";
+            ((MenuItem)menu.Items[1]).Header = Localize.GameMode();
+            ((MenuItem)menu.Items[2]).Header = Localize.PositionReset();
+            ((MenuItem)menu.Items[3]).Header = Localize.iconTraySettings();
+            ((MenuItem)menu.Items[4]).Header = Localize.iconTrayExit();
+        }
+
+        private void InitializeContextMenu()
+        {
+            var menu = _contextMenu;
+            menu.Items.Clear();
+            var openIcon = new FontIcon { Glyph = "\ue71e" };
+            var open = new MenuItem
+            {
+                Header = Localize.iconTrayOpen() + " (" + _settings.Hotkey + ")",
+                Icon = openIcon
+            };
+            var gamemodeIcon = new FontIcon { Glyph = "\ue7fc" };
+            var gamemode = new MenuItem
+            {
+                Header = Localize.GameMode(),
+                Icon = gamemodeIcon
+            };
+            var positionresetIcon = new FontIcon { Glyph = "\ue73f" };
+            var positionreset = new MenuItem
+            {
+                Header = Localize.PositionReset(),
+                Icon = positionresetIcon
+            };
+            var settingsIcon = new FontIcon { Glyph = "\ue713" };
+            var settings = new MenuItem
+            {
+                Header = Localize.iconTraySettings(),
+                Icon = settingsIcon
+            };
+            var exitIcon = new FontIcon { Glyph = "\ue7e8" };
+            var exit = new MenuItem
+            {
+                Header = Localize.iconTrayExit(),
+                Icon = exitIcon
+            };
+
+            open.Click += (o, e) => _viewModel.ToggleFlowLauncher();
+            gamemode.Click += (o, e) => _viewModel.ToggleGameMode();
+            positionreset.Click += (o, e) => _ = PositionResetAsync();
+            settings.Click += (o, e) => App.API.OpenSettingDialog();
+            exit.Click += (o, e) => Close();
+
+            gamemode.ToolTip = Localize.GameModeToolTip();
+            positionreset.ToolTip = Localize.PositionResetToolTip();
+
+            _contextMenu.Items.Add(open);
+            _contextMenu.Items.Add(gamemode);
+            _contextMenu.Items.Add(positionreset);
+            _contextMenu.Items.Add(settings);
+            _contextMenu.Items.Add(exit);
+        }
+
+        #endregion
+
+        #region Window Position
+
+        public void UpdatePosition()
+        {
+            // Initialize call twice to workaround multi-display alignment issue- https://github.com/Flow-Launcher/Flow.Launcher/issues/2910
+            if (_viewModel.IsDialogJumpWindowUnderDialog())
+            {
+                InitializeDialogJumpPosition();
+                InitializeDialogJumpPosition();
+            }
+            else
+            {
+                InitializePosition();
+                InitializePosition();
+            }
+        }
+
+        private async Task PositionResetAsync()
+        {
+            _viewModel.Show();
+            await Task.Delay(300); // If don't give a time, Positioning will be weird.
+            var screen = SelectedScreen();
+            Left = HorizonCenter(screen);
+            Top = VerticalCenter(screen);
+        }
+
+        private void InitializePosition()
+        {
+            // Initialize call twice to workaround multi-display alignment issue- https://github.com/Flow-Launcher/Flow.Launcher/issues/2910
+            InitializePositionInner();
+            InitializePositionInner();
+            return;
+
+            void InitializePositionInner()
+            {
+                if (_settings.SearchWindowScreen == SearchWindowScreens.RememberLastLaunchLocation)
+                {
+                    var previousScreenWidth = _settings.PreviousScreenWidth;
+                    var previousScreenHeight = _settings.PreviousScreenHeight;
+                    GetDpi(out var previousDpiX, out var previousDpiY);
+
+                    _settings.PreviousScreenWidth = SystemParameters.VirtualScreenWidth;
+                    _settings.PreviousScreenHeight = SystemParameters.VirtualScreenHeight;
+                    GetDpi(out var currentDpiX, out var currentDpiY);
+
+                    if (previousScreenWidth != 0 && previousScreenHeight != 0 &&
+                        previousDpiX != 0 && previousDpiY != 0 &&
+                        (previousScreenWidth != SystemParameters.VirtualScreenWidth ||
+                         previousScreenHeight != SystemParameters.VirtualScreenHeight ||
+                         previousDpiX != currentDpiX || previousDpiY != currentDpiY))
+                    {
+                        AdjustPositionForResolutionChange();
+                        return;
+                    }
+
+                    Left = _settings.WindowLeft;
+                    Top = _settings.WindowTop;
+                }
+                else
+                {
+                    var screen = SelectedScreen();
+                    switch (_settings.SearchWindowAlign)
+                    {
+                        case SearchWindowAligns.Center:
+                            Left = HorizonCenter(screen);
+                            Top = VerticalCenter(screen);
+                            break;
+                        case SearchWindowAligns.CenterTop:
+                            Left = HorizonCenter(screen);
+                            Top = VerticalTop(screen);
+                            break;
+                        case SearchWindowAligns.LeftTop:
+                            Left = HorizonLeft(screen);
+                            Top = VerticalTop(screen);
+                            break;
+                        case SearchWindowAligns.RightTop:
+                            Left = HorizonRight(screen);
+                            Top = VerticalTop(screen);
+                            break;
+                        case SearchWindowAligns.Custom:
+                            var customLeft = Win32Helper.TransformPixelsToDIP(this,
+                                screen.WorkingArea.X + _settings.CustomWindowLeft, 0);
+                            var customTop = Win32Helper.TransformPixelsToDIP(this, 0,
+                                screen.WorkingArea.Y + _settings.CustomWindowTop);
+                            Left = customLeft.X;
+                            Top = customTop.Y;
+                            break;
+                    }
+                }
+            }
+        }
+
+        private void AdjustPositionForResolutionChange()
+        {
+            var screenWidth = SystemParameters.VirtualScreenWidth;
+            var screenHeight = SystemParameters.VirtualScreenHeight;
+            GetDpi(out var currentDpiX, out var currentDpiY);
+
+            var previousLeft = _settings.WindowLeft;
+            var previousTop = _settings.WindowTop;
+            GetDpi(out var previousDpiX, out var previousDpiY);
+
+            var widthRatio = screenWidth / _settings.PreviousScreenWidth;
+            var heightRatio = screenHeight / _settings.PreviousScreenHeight;
+            var dpiXRatio = currentDpiX / previousDpiX;
+            var dpiYRatio = currentDpiY / previousDpiY;
+
+            var newLeft = previousLeft * widthRatio * dpiXRatio;
+            var newTop = previousTop * heightRatio * dpiYRatio;
+
+            var screenLeft = SystemParameters.VirtualScreenLeft;
+            var screenTop = SystemParameters.VirtualScreenTop;
+
+            var maxX = screenLeft + screenWidth - ActualWidth;
+            var maxY = screenTop + screenHeight - ActualHeight;
+
+            Left = Math.Max(screenLeft, Math.Min(newLeft, maxX));
+            Top = Math.Max(screenTop, Math.Min(newTop, maxY));
+        }
+
+        private void GetDpi(out double dpiX, out double dpiY)
+        {
+            var source = PresentationSource.FromVisual(this);
+            if (source != null && source.CompositionTarget != null)
+            {
+                var matrix = source.CompositionTarget.TransformToDevice;
+                dpiX = 96 * matrix.M11;
+                dpiY = 96 * matrix.M22;
+            }
+            else
+            {
+                dpiX = 96;
+                dpiY = 96;
+            }
+        }
+
+        private MonitorInfo SelectedScreen()
+        {
+            MonitorInfo screen;
+            switch (_settings.SearchWindowScreen)
+            {
+                case SearchWindowScreens.Cursor:
+                    screen = MonitorInfo.GetCursorDisplayMonitor();
+                    break;
+                case SearchWindowScreens.Focus:
+                    screen = MonitorInfo.GetNearestDisplayMonitor(Win32Helper.GetForegroundWindow());
+                    break;
+                case SearchWindowScreens.Primary:
+                    screen = MonitorInfo.GetPrimaryDisplayMonitor();
+                    break;
+                case SearchWindowScreens.Custom:
+                    var allScreens = MonitorInfo.GetDisplayMonitors();
+                    if (_settings.CustomScreenNumber <= allScreens.Count)
+                        screen = allScreens[_settings.CustomScreenNumber - 1];
+                    else
+                        screen = allScreens[0];
+                    break;
+                default:
+                    screen = MonitorInfo.GetDisplayMonitors()[0];
+                    break;
+            }
+
+            return screen ?? MonitorInfo.GetDisplayMonitors()[0];
+        }
+
+        private double HorizonCenter(MonitorInfo screen)
+        {
+            var dip1 = Win32Helper.TransformPixelsToDIP(this, screen.WorkingArea.X, 0);
+            var dip2 = Win32Helper.TransformPixelsToDIP(this, screen.WorkingArea.Width, 0);
+            var left = (dip2.X - ActualWidth) / 2 + dip1.X;
+            return left;
+        }
+
+        private double VerticalCenter(MonitorInfo screen)
+        {
+            var dip1 = Win32Helper.TransformPixelsToDIP(this, 0, screen.WorkingArea.Y);
+            var dip2 = Win32Helper.TransformPixelsToDIP(this, 0, screen.WorkingArea.Height);
+            var top = (dip2.Y - QueryTextBox.ActualHeight) / 4 + dip1.Y;
+            return top;
+        }
+
+        private double HorizonRight(MonitorInfo screen)
+        {
+            var dip1 = Win32Helper.TransformPixelsToDIP(this, screen.WorkingArea.X, 0);
+            var dip2 = Win32Helper.TransformPixelsToDIP(this, screen.WorkingArea.Width, 0);
+            var left = (dip1.X + dip2.X - ActualWidth) - 10;
+            return left;
+        }
+
+        private double HorizonLeft(MonitorInfo screen)
+        {
+            var dip1 = Win32Helper.TransformPixelsToDIP(this, screen.WorkingArea.X, 0);
+            var left = dip1.X + 10;
+            return left;
+        }
+
+        private double VerticalTop(MonitorInfo screen)
+        {
+            var dip1 = Win32Helper.TransformPixelsToDIP(this, 0, screen.WorkingArea.Y);
+            var top = dip1.Y + 10;
+            return top;
+        }
+
+        #endregion
+
+        #region Window Animation
+
+        private void InitProgressbarAnimation()
+        {
+            _progressBarStoryboard = new Storyboard();
+
+            var animationDuration = new Duration(TimeSpan.FromMilliseconds(1600));
+            var progressBarLength = ProgressBar.X2 - ProgressBar.X1;
+
+            var lineEndAnimation = new DoubleAnimation
+            {
+                From = ProgressBar.X2,
+                To = ProgressBar.ActualWidth + progressBarLength,
+                Duration = animationDuration
+            };
+            var lineStartAnimation = new DoubleAnimation
+            {
+                From = ProgressBar.X1,
+                To = ProgressBar.ActualWidth,
+                Duration = animationDuration
+            };
+            
+            Storyboard.SetTarget(lineEndAnimation, ProgressBar);
+            Storyboard.SetTargetProperty(lineEndAnimation, new PropertyPath("(Line.X2)"));
+            
+            Storyboard.SetTarget(lineStartAnimation, ProgressBar);
+            Storyboard.SetTargetProperty(lineStartAnimation, new PropertyPath("(Line.X1)"));
+            
+            _progressBarStoryboard.Children.Add(lineEndAnimation);
+            _progressBarStoryboard.Children.Add(lineStartAnimation);
+            _progressBarStoryboard.RepeatBehavior = RepeatBehavior.Forever;
+
+            lineEndAnimation.Freeze();
+            lineStartAnimation.Freeze();
+
+            ProgressBar.IsVisibleChanged -= ProgressBar_IsVisibleChanged;
+            ProgressBar.IsVisibleChanged += ProgressBar_IsVisibleChanged;
+
+            _viewModel.ProgressBarVisibility = Visibility.Hidden;
+        }
+
+        private void ProgressBar_IsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+        {
+            if (_progressBarStoryboard == null)
+            {
+                return;
+            }
+
+            if (ProgressBar.IsVisible)
+            {
+                _progressBarStoryboard.Begin(ProgressBar, true);
+            }
+            else
+            {
+                _progressBarStoryboard.Stop(ProgressBar);
+            }
+        }
+
+        private void WindowAnimation()
+        {
+            _isArrowKeyPressed = true;
+
+            var clocksb = new Storyboard();
+            var iconsb = new Storyboard();
+            var easing = new CircleEase { EasingMode = EasingMode.EaseInOut };
+
+            var animationLength = _settings.AnimationSpeed switch
+            {
+                AnimationSpeeds.Slow => 560,
+                AnimationSpeeds.Medium => 360,
+                AnimationSpeeds.Fast => 160,
+                _ => _settings.CustomAnimationLength
+            };
+
+            var IconMotion = new DoubleAnimation
+            {
+                From = 12,
+                To = 0,
+                EasingFunction = easing,
+                Duration = TimeSpan.FromMilliseconds(animationLength),
+                FillBehavior = FillBehavior.HoldEnd
+            };
+
+            var ClockOpacity = new DoubleAnimation
+            {
+                From = 0,
+                To = 1,
+                EasingFunction = easing,
+                Duration = TimeSpan.FromMilliseconds(animationLength),
+                FillBehavior = FillBehavior.HoldEnd
+            };
+
+            var TargetIconOpacity = GetOpacityFromStyle(SearchIcon.Style, 1.0);
+
+            var IconOpacity = new DoubleAnimation
+            {
+                From = 0,
+                To = TargetIconOpacity,
+                EasingFunction = easing,
+                Duration = TimeSpan.FromMilliseconds(animationLength),
+                FillBehavior = FillBehavior.HoldEnd
+            };
+
+            var rightMargin = GetThicknessFromStyle(ClockPanel.Style, new Thickness(0, 0, DefaultRightMargin, 0)).Right;
+
+            var thicknessAnimation = new ThicknessAnimation
+            {
+                From = new Thickness(0, 12, rightMargin, 0),
+                To = new Thickness(0, 0, rightMargin, 0),
+                EasingFunction = easing,
+                Duration = TimeSpan.FromMilliseconds(animationLength),
+                FillBehavior = FillBehavior.HoldEnd
+            };
+
+            Storyboard.SetTarget(ClockOpacity, ClockPanel);
+            Storyboard.SetTargetProperty(ClockOpacity, new PropertyPath(OpacityProperty));
+
+            Storyboard.SetTarget(thicknessAnimation, ClockPanel);
+            Storyboard.SetTargetProperty(thicknessAnimation, new PropertyPath(MarginProperty));
+
+            Storyboard.SetTarget(IconMotion, SearchIcon);
+            Storyboard.SetTargetProperty(IconMotion, new PropertyPath(TopProperty));
+
+            Storyboard.SetTarget(IconOpacity, SearchIcon);
+            Storyboard.SetTargetProperty(IconOpacity, new PropertyPath(OpacityProperty));
+
+            clocksb.Children.Add(thicknessAnimation);
+            clocksb.Children.Add(ClockOpacity);
+            iconsb.Children.Add(IconMotion);
+            iconsb.Children.Add(IconOpacity);
+
+            _settings.WindowLeft = Left;
+            _isArrowKeyPressed = false;
+
+            clocksb.Begin(ClockPanel);
+            iconsb.Begin(SearchIcon);
+        }
+
+        private void UpdateClockPanelVisibility()
+        {
+            if (QueryTextBox == null || ResultContextMenu == null || History == null || ClockPanel == null)
+            {
+                return;
+            }
+
+            // ✅ Initialize animation length & duration
+            var animationLength = _settings.AnimationSpeed switch
+            {
+                AnimationSpeeds.Slow => 560,
+                AnimationSpeeds.Medium => 360,
+                AnimationSpeeds.Fast => 160,
+                _ => _settings.CustomAnimationLength
+            };
+            var animationDuration = TimeSpan.FromMilliseconds(animationLength * 2 / 3);
+
+            // ✅ Conditions for showing ClockPanel (No query input / ResultContextMenu & History are closed)
+            var shouldShowClock = QueryTextBox.Text.Length == 0 &&
+                ResultContextMenu.Visibility != Visibility.Visible &&
+                History.Visibility != Visibility.Visible;
+
+            // ✅ 1. When ResultContextMenu opens, immediately set Visibility.Hidden (force hide without animation)
+            if (ResultContextMenu.Visibility == Visibility.Visible)
+            {
+                _viewModel.ClockPanelVisibility = Visibility.Hidden;
+                _viewModel.ClockPanelOpacity = 0.0;  // Set to 0 in case Opacity animation affects it
+                return;
+            }
+
+            // ✅ 2. When ResultContextMenu is closed, keep it Hidden if there's text in the query (remember previous state)
+            else if (QueryTextBox.Text.Length > 0)
+            {
+                _viewModel.ClockPanelVisibility = Visibility.Hidden;
+                _viewModel.ClockPanelOpacity = 0.0;
+                return;
+            }
+
+            // ✅ Prevent multiple animations
+            if (_isClockPanelAnimating)
+            {
+                return;
+            }
+
+            // ✅ 3. When hiding ClockPanel (apply fade-out animation)
+            if ((!shouldShowClock) && _viewModel.ClockPanelVisibility == Visibility.Visible)
+            {
+                _isClockPanelAnimating = true;
+
+                var fadeOut = new DoubleAnimation
+                {
+                    From = 1.0,
+                    To = 0.0,
+                    Duration = animationDuration,
+                    FillBehavior = FillBehavior.HoldEnd
+                };
+
+                fadeOut.Completed += (s, e) =>
+                {
+                    _viewModel.ClockPanelVisibility = Visibility.Hidden; // ✅ Completely hide after animation
+                    _isClockPanelAnimating = false;
+                };
+
+                ClockPanel.BeginAnimation(OpacityProperty, fadeOut);
+            }
+
+            // ✅ 4. When showing ClockPanel (apply fade-in animation)
+            else if (shouldShowClock && _viewModel.ClockPanelVisibility != Visibility.Visible)
+            {
+                _isClockPanelAnimating = true;
+
+                _viewModel.ClockPanelVisibility = Visibility.Visible;  // ✅ Set Visibility to Visible first
+
+                var fadeIn = new DoubleAnimation
+                {
+                    From = 0.0,
+                    To = 1.0,
+                    Duration = animationDuration,
+                    FillBehavior = FillBehavior.HoldEnd
+                };
+
+                fadeIn.Completed += (s, e) => _isClockPanelAnimating = false;
+
+                ClockPanel.BeginAnimation(OpacityProperty, fadeIn);
+            }
+        }
+
+        private static double GetOpacityFromStyle(Style style, double defaultOpacity = 1.0)
+        {
+            if (style == null)
+            {
+                return defaultOpacity;
+            }
+
+            foreach (Setter setter in style.Setters.Cast<Setter>())
+            {
+                if (setter.Property == OpacityProperty)
+                {
+                    return setter.Value is double opacity ? opacity : defaultOpacity;
+                }
+            }
+
+            return defaultOpacity;
+        }
+
+        private static Thickness GetThicknessFromStyle(Style style, Thickness defaultThickness)
+        {
+            if (style == null)
+            {
+                return defaultThickness;
+            }
+
+            foreach (Setter setter in style.Setters.Cast<Setter>())
+            {
+                if (setter.Property == MarginProperty)
+                {
+                    return setter.Value is Thickness thickness ? thickness : defaultThickness;
+                }
+            }
+
+            return defaultThickness;
+        }
+
+        #endregion
+
+        #region QueryTextBox Event
+
+        private void QueryTextBox_OnCopy(object sender, ExecutedRoutedEventArgs e)
+        {
+            var result = _viewModel.Results.SelectedItem?.Result;
+            if (QueryTextBox.SelectionLength == 0 && result != null)
+            {
+                string copyText = result.CopyText;
+                App.API.CopyToClipboard(copyText, directCopy: true);
+            }
+            else if (!string.IsNullOrEmpty(QueryTextBox.Text))
+            {
+                App.API.CopyToClipboard(QueryTextBox.SelectedText, showDefaultNotification: false);
+            }
+        }
+
+        private void QueryTextBox_OnPaste(object sender, DataObjectPastingEventArgs e)
+        {
+            try
+            {
+                var isText = e.SourceDataObject.GetDataPresent(DataFormats.UnicodeText, true);
+                if (isText)
+                {
+                    var text = e.SourceDataObject.GetData(DataFormats.UnicodeText) as string;
+                    text = text.Replace(Environment.NewLine, " ");
+                    DataObject data = new DataObject();
+                    data.SetData(DataFormats.UnicodeText, text);
+                    e.DataObject = data;
+                }
+            }
+            catch (Exception ex)
+            {
+                App.API.LogException(ClassName, "Failed to paste text", ex);
+            }
+        }
+
+        private void QueryTextBox_KeyUp(object sender, KeyEventArgs e)
+        {
+            if (_viewModel.QueryText != QueryTextBox.Text)
+            {
+                BindingExpression be = QueryTextBox.GetBindingExpression(TextBox.TextProperty);
+                be.UpdateSource();
+            }
+        }
+
+        private void QueryTextBox_OnPreviewDragOver(object sender, DragEventArgs e)
+        {
+            e.Handled = true;
+        }
+
+        #endregion
+
+        #region Placeholder
+
+        private void SetupPlaceholderText()
+        {
+            if (_settings.ShowPlaceholder)
+            {
+                QueryTextBox.TextChanged += QueryTextBox_TextChanged;
+                QueryTextSuggestionBox.TextChanged += QueryTextSuggestionBox_TextChanged;
+                SetPlaceholderText();
+            }
+            else
+            {
+                QueryTextBox.TextChanged -= QueryTextBox_TextChanged;
+                QueryTextSuggestionBox.TextChanged -= QueryTextSuggestionBox_TextChanged;
+                QueryTextPlaceholderBox.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        private void QueryTextBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            SetPlaceholderText();
+        }
+
+        private void QueryTextSuggestionBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            SetPlaceholderText();
+        }
+
+        private void SetPlaceholderText()
+        {
+            var queryText = QueryTextBox.Text;
+            var suggestionText = QueryTextSuggestionBox.Text;
+            QueryTextPlaceholderBox.Visibility = string.IsNullOrEmpty(queryText) && string.IsNullOrEmpty(suggestionText) ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        #endregion
+
+        #region Resize Mode
+
+        private void SetupResizeMode()
+        {
+            ResizeMode = _settings.KeepMaxResults ? ResizeMode.NoResize : ResizeMode.CanResize;
+            if (WindowChrome.GetWindowChrome(this) is WindowChrome windowChrome)
+            {
+                _theme.SetResizeBorderThickness(windowChrome, _settings.KeepMaxResults);
+            }
+        }
+
+        #endregion
+
+        #region Search Delay
+
+        private void QueryTextBox_TextChanged1(object sender, TextChangedEventArgs e)
+        {
+            var textBox = (TextBox)sender;
+            _viewModel.QueryText = textBox.Text;
+            _viewModel.Query(_settings.SearchQueryResultsWithDelay);
+        }
+
+        #endregion
+
+        #region Dialog Jump
+
+        private void InitializeDialogJump()
+        {
+            DialogJump.ShowDialogJumpWindowAsync = _viewModel.SetupDialogJumpAsync;
+            DialogJump.UpdateDialogJumpWindow = InitializeDialogJumpPosition;
+            DialogJump.ResetDialogJumpWindow = _viewModel.ResetDialogJump;
+            DialogJump.HideDialogJumpWindow = _viewModel.HideDialogJump;
+        }
+
+        private void InitializeDialogJumpPosition()
+        {
+            if (_viewModel.DialogWindowHandle == nint.Zero || !_viewModel.MainWindowVisibilityStatus) return;
+            if (!_viewModel.IsDialogJumpWindowUnderDialog()) return;
+
+            // Get dialog window rect
+            var result = Win32Helper.GetWindowRect(_viewModel.DialogWindowHandle, out var window);
+            if (!result) return;
+
+            // Move window below the bottom of the dialog and keep it center
+            Top = VerticalBottom(window);
+            Left = HorizonCenter(window);
+        }
+
+        private double HorizonCenter(Rect window)
+        {
+            var dip1 = Win32Helper.TransformPixelsToDIP(this, window.X, 0);
+            var dip2 = Win32Helper.TransformPixelsToDIP(this, window.Width, 0);
+            var left = (dip2.X - ActualWidth) / 2 + dip1.X;
+            return left;
+        }
+
+        private double VerticalBottom(Rect window)
+        {
+            var dip1 = Win32Helper.TransformPixelsToDIP(this, 0, window.Bottom);
+            return dip1.Y;
+        }
+
+        #endregion
+
+        #region IDisposable
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!_disposed)
+            {
+                if (disposing)
+                {
+                    _hwndSource?.Dispose();
+                    _notifyIcon?.Dispose();
+                    UnregisterSoundEffectsEvent();
+                    DisposeSoundEffects();
+                    _viewModel.ActualApplicationThemeChanged -= ViewModel_ActualApplicationThemeChanged;
+                }
+
+                _disposed = true;
+            }
+        }
+
+        public void Dispose()
+        {
+            // Do not change this code. Put cleanup code in 'Dispose(bool disposing)' method
+            Dispose(disposing: true);
+            GC.SuppressFinalize(this);
+        }
+
+        #endregion
+    }
+}

@@ -1,0 +1,120 @@
+﻿<Window
+    x:Class="Flow.Launcher.WelcomeWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="clr-namespace:Flow.Launcher.Resources.Controls"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:local="clr-namespace:Flow.Launcher"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:ui="http://schemas.inkore.net/lib/ui/wpf/modern"
+    xmlns:vm="clr-namespace:Flow.Launcher.ViewModel"
+    Name="FlowWelcomeWindow"
+    Title="{DynamicResource Welcome_Page1_Title}"
+    Width="550"
+    Height="700"
+    MinWidth="550"
+    MinHeight="700"
+    MaxWidth="550"
+    MaxHeight="700"
+    d:DataContext="{d:DesignInstance Type=vm:WelcomeViewModel}"
+    Activated="OnActivated"
+    Background="{DynamicResource Color00B}"
+    Closed="Window_Closed"
+    Foreground="{DynamicResource PopupTextColor}"
+    MouseDown="window_MouseDown"
+    WindowStartupLocation="CenterScreen"
+    mc:Ignorable="d">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="32" ResizeBorderThickness="{x:Static SystemParameters.WindowResizeBorderThickness}" />
+    </WindowChrome.WindowChrome>
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition />
+            <RowDefinition Height="80" />
+        </Grid.RowDefinitions>
+        <StackPanel Grid.Row="0">
+
+            <controls:CustomWindowTitleBar
+                ShowMinimizeButton="False"
+                ShowMaximizeRestoreButton="False"
+                ShowCloseButton="True" />
+                
+            <StackPanel Margin="0">
+                <ui:Frame
+                    x:Name="ContentFrame"
+                    HorizontalAlignment="Stretch"
+                    Loaded="ContentFrame_Loaded">
+                    <ui:Frame.ContentTransitions>
+                        <ui:TransitionCollection>
+                            <ui:NavigationThemeTransition />
+                        </ui:TransitionCollection>
+                    </ui:Frame.ContentTransitions>
+                </ui:Frame>
+            </StackPanel>
+        </StackPanel>
+        <Border
+            Grid.Row="1"
+            Background="{DynamicResource Color00B}"
+            BorderBrush="{DynamicResource PopupButtonAreaBorderColor}"
+            BorderThickness="0 1 0 0">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="130" />
+                    <ColumnDefinition />
+                    <ColumnDefinition Width="130" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel
+                    Grid.Column="0"
+                    Grid.ColumnSpan="3"
+                    VerticalAlignment="Center">
+                    <TextBlock
+                        Name="PageNavigation"
+                        Margin="0 2 0 0"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        FontSize="14"
+                        Text="{Binding PageDisplay, Mode=OneWay}"
+                        TextAlignment="Center" />
+                </StackPanel>
+
+                <Button
+                    x:Name="SkipButton"
+                    Grid.Column="0"
+                    Width="100"
+                    Height="40"
+                    Margin="20 5 0 5"
+                    Click="BtnCancel_OnClick"
+                    Content="{DynamicResource Skip}"
+                    DockPanel.Dock="Right"
+                    FontSize="14" />
+                <DockPanel
+                    Grid.Column="2"
+                    Margin="0 0 20 0"
+                    VerticalAlignment="Stretch">
+                    <Button
+                        x:Name="NextButton"
+                        Width="40"
+                        Height="40"
+                        Margin="8 5 0 5"
+                        Click="ForwardButton_Click"
+                        DockPanel.Dock="Right"
+                        IsEnabled="{Binding NextEnabled, Mode=OneWay}">
+                        <ui:FontIcon FontSize="18" Glyph="&#xe76c;" />
+                    </Button>
+                    <Button
+                        x:Name="BackButton"
+                        Width="40"
+                        Height="40"
+                        Click="BackwardButton_Click"
+                        DockPanel.Dock="Right"
+                        IsEnabled="{Binding BackEnabled, Mode=OneWay}">
+                        <ui:FontIcon FontSize="18" Glyph="&#xe76b;" />
+                    </Button>
+                    <StackPanel />
+                </DockPanel>
+
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

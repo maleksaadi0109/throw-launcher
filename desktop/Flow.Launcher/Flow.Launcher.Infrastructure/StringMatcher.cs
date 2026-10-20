@@ -1,0 +1,431 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using CommunityToolkit.Mvvm.DependencyInjection;
+using Flow.Launcher.Infrastructure.UserSettings;
+using Flow.Launcher.Plugin.SharedModels;
+
+namespace Flow.Launcher.Infrastructure
+{
+    public class StringMatcher
+    {
+        private readonly MatchOption _defaultMatchOption = new();
+        private readonly Settings _settings;
+        public SearchPrecisionScore UserSettingSearchPrecision { get; set; }
+
+        private readonly IAlphabet _alphabet;
+
+        public StringMatcher(IAlphabet alphabet, Settings settings)
+        {
+            _alphabet = alphabet;
+            _settings = settings;
+            UserSettingSearchPrecision = _settings.QuerySearchPrecision;
+        }
+
+        public static MatchResult FuzzySearch(string query, string stringToCompare)
+        {
+            return Ioc.Default.GetRequiredService<StringMatcher>().FuzzyMatch(query, stringToCompare);
+        }
+
+        public MatchResult FuzzyMatch(string query, string stringToCompare)
+        {
+            return FuzzyMatch(query, stringToCompare, _defaultMatchOption);
+        }
+
+        /// <summary>
+        /// Current method has two parts, Acronym Match and Fuzzy Search:
+        /// 
+        /// Acronym Match:
+        /// Charater listed below will be considered as acronym
+        /// 1. Character on index 0
+        /// 2. Character appears after a space
+        /// 3. Character that is UpperCase
+        /// 4. Character that is number
+        /// 
+        /// Acronym Match will succeed when all query characters match with acronyms in stringToCompare.
+        /// Contiguous digit characters are considered as one acronym group -> e.g. vs19 for Visual Studio 2019 is
+        /// considered 3 matched groups [v][s][19].
+        /// If any of the characters in the query isn't matched with stringToCompare, Acronym Match will fail.
+        /// Score will be calculated based the percentage of all query characters matched with total acronyms in stringToCompare.
+        /// 
+        /// Fuzzy Search:
+        /// Character matching + substring matching;
+        /// 1. Query search string is split into substrings, separator is whitespace.
+        /// 2. Check each query substring's characters against full compare string,
+        /// 3. if a character in the substring is matched, loop back to verify the previous character.
+        /// 4. If previous character also matches, and is the start of the substring, update list.
+        /// 5. Once the previous character is verified, move on to the next character in the query substring.
+        /// 6. Move onto the next substring's characters until all substrings are checked.
+        /// 7. Consider success and move onto scoring if every char or substring without whitespaces matched
+        /// </summary>
+        public MatchResult FuzzyMatch(string query, string stringToCompare, MatchOption opt)
+        {
+            if (string.IsNullOrEmpty(stringToCompare) || string.IsNullOrEmpty(query))
+                return new MatchResult(false, UserSettingSearchPrecision);
+
+            query = query.Trim();
+            TranslationMapping translationMapping = null;
+            if (_alphabet is not null && _alphabet.ShouldTranslate(query))
+            {
+                // We assume that if a query can be translated (containing characters of a language, like Chinese)
+                // it actually means user doesn't want it to be translated to English letters.
+                (stringToCompare, translationMapping) = _alphabet.Translate(stringToCompare);
+            }
+
+            var currentAcronymQueryIndex = 0;
+            var acronymMatchData = new List<int>();
+            // Count of distinct acronym groups in the compare string.
+            // Digit runs count as one group (e.g. "2019" is 1 group, not 4).
+            int acronymsTotalCount = 0;
+            int acronymsMatched = 0;
+
+            var queryToCompare = query;
+            bool ignoreAccents = _settings.IgnoreAccents;
+            bool ignoreCase = opt.IgnoreCase;
+
+            if (ignoreAccents)
+            {
+                queryToCompare = DiacriticsNormalizer.Normalize(queryToCompare);
+            }
+            else if (ignoreCase)
+            {
+                queryToCompare = queryToCompare.ToLower();
+            }
+
+            var querySubstrings = queryToCompare.Split([' '], StringSplitOptions.RemoveEmptyEntries);
+            int currentQuerySubstringIndex = 0;
+            var currentQuerySubstring = querySubstrings[currentQuerySubstringIndex];
+            var currentQuerySubstringCharacterIndex = 0;
+
+            var firstMatchIndex = -1;
+            var firstMatchIndexInWord = -1;
+            var lastMatchIndex = 0;
+            bool allQuerySubstringsMatched = false;
+            bool matchFoundInPreviousLoop = false;
+            bool allSubstringsContainedInCompareString = true;
+
+            var indexList = new List<int>();
+            List<int> spaceIndices = new List<int>();
+
+            for (var compareStringIndex = 0; compareStringIndex < stringToCompare.Length; compareStringIndex++)
+            {
+                // If acronyms matching successfully finished, this gets the remaining not matched acronyms for score calculation
+                if (currentAcronymQueryIndex >= query.Length && acronymsMatched == query.Length)
+                {
+                    if (IsAcronymCount(stringToCompare, compareStringIndex))
+                        acronymsTotalCount++;
+                    continue;
+                }
+
+                if (currentAcronymQueryIndex >= query.Length ||
+                    currentAcronymQueryIndex >= query.Length && allQuerySubstringsMatched)
+                    break;
+
+                char compareChar = stringToCompare[compareStringIndex];
+                if (ignoreAccents)
+                {
+                    compareChar = DiacriticsNormalizer.NormalizeChar(compareChar);
+                }
+                else if (ignoreCase)
+                {
+                    compareChar = char.ToLower(compareChar);
+                }
+
+                // To maintain a list of indices which correspond to spaces in the string to compare
+                // To populate the list only for the first query substring
+                if (compareChar == ' ' && currentQuerySubstringIndex == 0)
+                    spaceIndices.Add(compareStringIndex);
+
+                // Acronym Match
+                if (IsAcronym(stringToCompare, compareStringIndex))
+                {
+                    if (compareChar == queryToCompare[currentAcronymQueryIndex])
+                    {
+                        acronymMatchData.Add(compareStringIndex);
+                        acronymsMatched++;
+
+                        currentAcronymQueryIndex++;
+                    }
+                }
+
+                if (IsAcronymCount(stringToCompare, compareStringIndex))
+                    acronymsTotalCount++;
+
+                if (allQuerySubstringsMatched || compareChar !=
+                    currentQuerySubstring[currentQuerySubstringCharacterIndex])
+                {
+                    matchFoundInPreviousLoop = false;
+
+                    continue;
+                }
+
+                if (firstMatchIndex < 0)
+                {
+                    // first matched char will become the start of the compared string
+                    firstMatchIndex = compareStringIndex;
+                }
+
+                if (currentQuerySubstringCharacterIndex == 0)
+                {
+                    // first letter of current word
+                    matchFoundInPreviousLoop = true;
+                    firstMatchIndexInWord = compareStringIndex;
+                }
+                else if (!matchFoundInPreviousLoop)
+                {
+                    // we want to verify that there is not a better match if this is not a full word
+                    // in order to do so we need to verify all previous chars are part of the pattern
+                    var startIndexToVerify = compareStringIndex - currentQuerySubstringCharacterIndex;
+
+                    if (AllPreviousCharsMatched(startIndexToVerify, currentQuerySubstringCharacterIndex,
+                            stringToCompare, currentQuerySubstring, ignoreAccents, ignoreCase))
+                    {
+                        matchFoundInPreviousLoop = true;
+
+                        // if it's the beginning character of the first query substring that is matched then we need to update start index
+                        firstMatchIndex = currentQuerySubstringIndex == 0 ? startIndexToVerify : firstMatchIndex;
+
+                        indexList = GetUpdatedIndexList(startIndexToVerify, currentQuerySubstringCharacterIndex,
+                            firstMatchIndexInWord, indexList);
+                    }
+                }
+
+                lastMatchIndex = compareStringIndex + 1;
+                indexList.Add(compareStringIndex);
+
+                currentQuerySubstringCharacterIndex++;
+
+                // if finished looping through every character in the current substring
+                if (currentQuerySubstringCharacterIndex == currentQuerySubstring.Length)
+                {
+                    // if any of the substrings was not matched then consider as all are not matched
+                    allSubstringsContainedInCompareString =
+                        matchFoundInPreviousLoop && allSubstringsContainedInCompareString;
+
+                    currentQuerySubstringIndex++;
+
+                    allQuerySubstringsMatched =
+                        AllQuerySubstringsMatched(currentQuerySubstringIndex, querySubstrings.Length);
+
+                    if (allQuerySubstringsMatched)
+                        continue;
+
+                    // otherwise move to the next query substring
+                    currentQuerySubstring = querySubstrings[currentQuerySubstringIndex];
+                    currentQuerySubstringCharacterIndex = 0;
+                }
+            }
+
+            // return acronym match if all query char matched
+            if (acronymsMatched > 0 && acronymsMatched == query.Length)
+            {
+                // we need to consider groups to avoid counting digit runs multiple times
+                int matchedGroups = CountDistinctAcronymGroups(acronymMatchData, stringToCompare);
+                int acronymScore = matchedGroups * 100 / acronymsTotalCount;
+
+                if (acronymScore >= (int)UserSettingSearchPrecision)
+                {
+                    acronymMatchData = acronymMatchData.Select(x => translationMapping?.MapToOriginalIndex(x) ?? x).Distinct().ToList();
+                    return new MatchResult(true, UserSettingSearchPrecision, acronymMatchData, acronymScore);
+                }
+            }
+
+            // proceed to calculate score if every char or substring without whitespaces matched
+            if (allQuerySubstringsMatched)
+            {
+                var nearestSpaceIndex = CalculateClosestSpaceIndex(spaceIndices, firstMatchIndex);
+
+                // firstMatchIndex - nearestSpaceIndex - 1 is to set the firstIndex as the index of the first matched char
+                // preceded by a space e.g. 'world' matching 'hello world' firstIndex would be 0 not 6 
+                // giving more weight than 'we or donald' by allowing the distance calculation to treat the starting position at after the space.
+                var score = CalculateSearchScore(query, stringToCompare, firstMatchIndex - nearestSpaceIndex - 1, spaceIndices,
+                    lastMatchIndex - firstMatchIndex, allSubstringsContainedInCompareString);
+
+                var resultList = indexList.Select(x => translationMapping?.MapToOriginalIndex(x) ?? x).Distinct().ToList();
+                return new MatchResult(true, UserSettingSearchPrecision, resultList, score);
+            }
+
+            return new MatchResult(false, UserSettingSearchPrecision);
+        }
+
+        private static bool IsAcronym(string stringToCompare, int compareStringIndex)
+        {
+            if (IsAcronymChar(stringToCompare, compareStringIndex) || IsAcronymNumber(stringToCompare, compareStringIndex))
+                return true;
+
+            return false;
+        }
+
+        // When counting acronyms, treat a set of numbers as one acronym ie. Visual 2019 as 2 acronyms instead of 5
+        private static bool IsAcronymCount(string stringToCompare, int compareStringIndex)
+        {
+            if (IsAcronymChar(stringToCompare, compareStringIndex))
+                return true;
+
+            // Count only the first digit of a contiguous digit run as a single acronym group,
+            // matching the same grouping logic used by CountDistinctAcronymGroups.
+            if (IsAcronymNumber(stringToCompare, compareStringIndex))
+                return compareStringIndex == 0 || !IsAcronymNumber(stringToCompare, compareStringIndex - 1);
+
+            return false;
+        }
+
+        private static bool IsAcronymChar(string stringToCompare, int compareStringIndex)
+            => char.IsUpper(stringToCompare[compareStringIndex]) ||
+               compareStringIndex == 0 || // 0 index means char is the start of the compare string, which is an acronym
+               char.IsWhiteSpace(stringToCompare[compareStringIndex - 1]);
+
+        private static bool IsAcronymNumber(string stringToCompare, int compareStringIndex)
+            => char.IsAsciiDigit(stringToCompare[compareStringIndex]);
+
+        /// <summary>
+        /// Counts distinct acronym groups from matched character indices in <paramref name="stringToCompare"/>.
+        /// Each matched non-digit character index forms its own group.
+        /// Contiguous digit characters in the string form a single group regardless of how many indices match within the run.
+        ///
+        /// Example:
+        /// For "Visual Studio 2019", matched indices [0, 14, 17] refer to characters 'V', '2', and '9'.
+        /// These produce 2 groups: 'V' and the digit run "2019".
+        /// </summary>
+        private static int CountDistinctAcronymGroups(List<int> matchedIndices, string stringToCompare)
+        {
+            int groups = 0;
+            var processedIndices = new HashSet<int>();
+
+            foreach (int matchedIndex in matchedIndices)
+            {
+                // try process index and skip if already processed in a previous group
+                if (!processedIndices.Add(matchedIndex))
+                    continue;
+
+                // since we processed a new index we start a new group
+                groups += 1;
+
+                // if this isn't a digit then its a single index group so we stop here
+                if (!IsAcronymNumber(stringToCompare, matchedIndex))
+                    continue;
+
+                // check if this is a digit run and process any indices in that run as they are part of this group
+                int digitRunEnd = matchedIndex;
+                while (digitRunEnd < stringToCompare.Length - 1 && IsAcronymNumber(stringToCompare, digitRunEnd + 1))
+                {
+                    digitRunEnd += 1;
+                    processedIndices.Add(digitRunEnd);
+                }
+            }
+
+            return groups;
+        }
+
+        // To get the index of the closest space which preceeds the first matching index
+        private static int CalculateClosestSpaceIndex(List<int> spaceIndices, int firstMatchIndex)
+        {
+            var closestSpaceIndex = -1;
+
+            // spaceIndices should be ordered asc
+            foreach (var index in spaceIndices)
+            {
+                if (index < firstMatchIndex)
+                    closestSpaceIndex = index;
+                else
+                    break;
+            }
+
+            return closestSpaceIndex;
+        }
+
+        private static bool AllPreviousCharsMatched(int startIndexToVerify, int currentQuerySubstringCharacterIndex,
+            string stringToCompare, string currentQuerySubstring, bool ignoreAccents, bool ignoreCase)
+        {
+            for (int indexToCheck = 0; indexToCheck < currentQuerySubstringCharacterIndex; indexToCheck++)
+            {
+                char c = stringToCompare[startIndexToVerify + indexToCheck];
+                if (ignoreAccents)
+                {
+                    c = DiacriticsNormalizer.NormalizeChar(c);
+                }
+                else if (ignoreCase)
+                {
+                    c = char.ToLower(c);
+                }
+
+                if (c != currentQuerySubstring[indexToCheck])
+                    return false;
+            }
+
+            return true;
+        }
+
+        private static List<int> GetUpdatedIndexList(int startIndexToVerify, int currentQuerySubstringCharacterIndex,
+            int firstMatchIndexInWord, List<int> indexList)
+        {
+            var updatedList = new List<int>();
+
+            indexList.RemoveAll(x => x >= firstMatchIndexInWord);
+
+            updatedList.AddRange(indexList);
+
+            for (int indexToCheck = 0; indexToCheck < currentQuerySubstringCharacterIndex; indexToCheck++)
+            {
+                updatedList.Add(startIndexToVerify + indexToCheck);
+            }
+
+            return updatedList;
+        }
+
+        private static bool AllQuerySubstringsMatched(int currentQuerySubstringIndex, int querySubstringsLength)
+        {
+            // Acronym won't utilize the substring to match
+            return currentQuerySubstringIndex >= querySubstringsLength;
+        }
+
+        private static int CalculateSearchScore(string query, string stringToCompare, int firstIndex, List<int> spaceIndices, int matchLen,
+            bool allSubstringsContainedInCompareString)
+        {
+            // A match found near the beginning of a string is scored more than a match found near the end
+            // A match is scored more if the characters in the patterns are closer to each other, 
+            // while the score is lower if they are more spread out
+            var score = 100 * (query.Length + 1) / ((1 + firstIndex) + (matchLen + 1));
+
+            // Give more weight to a match that is closer to the start of the string. 
+            // if the first matched char is immediately before space and all strings are contained in the compare string e.g. 'world' matching 'hello world'
+            // and 'world hello', because both have 'world' immediately preceded by space, their firstIndex will be 0 when distance is calculated,
+            // to prevent them scoring the same, we adjust the score by deducting the number of spaces it has from the start of the string, so 'world hello'
+            // will score slightly higher than 'hello world' because 'hello world' has one additional space.
+            if (firstIndex == 0 && allSubstringsContainedInCompareString)
+                score -= spaceIndices.Count;
+
+            // A match with less characters assigning more weights
+            if (stringToCompare.Length - query.Length < 5)
+            {
+                score += 20;
+            }
+            else if (stringToCompare.Length - query.Length < 10)
+            {
+                score += 10;
+            }
+
+            if (allSubstringsContainedInCompareString)
+            {
+                int count = query.Count(c => !char.IsWhiteSpace(c));
+                //10 per char is too much for long query strings, this threshhold is to avoid where long strings will override the other results too much
+                int threshold = 4;
+                if (count <= threshold)
+                {
+                    score += count * 10;
+                }
+                else
+                {
+                    score += threshold * 10 + (count - threshold) * 5;
+                }
+            }
+
+            return score;
+        }
+    }
+
+    public class MatchOption
+    {
+        public bool IgnoreCase { get; set; } = true;
+    }
+}

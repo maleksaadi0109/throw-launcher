@@ -1,0 +1,254 @@
+﻿using System;
+using System.Collections.ObjectModel;
+using System.Text.Json.Serialization;
+using Flow.Launcher.Plugin.WebSearch.SuggestionSources;
+
+namespace Flow.Launcher.Plugin.WebSearch
+{
+    public class Settings : BaseModel
+    {
+        public Settings()
+        {
+            SelectedSuggestion = Suggestions[0];
+            if (SearchSources.Count > 0)
+            {
+                SelectedSearchSource = SearchSources[0];
+            }
+        }
+
+        public ObservableCollection<SearchSource> SearchSources { get; set; } = new ObservableCollection<SearchSource>
+        {
+            new SearchSource
+            {
+                Title = "Google",
+                ActionKeyword = "*",
+                Icon = "google.png",
+                Url = "https://www.google.com/search?q={q}",
+                Enabled = true
+            },
+            new SearchSource
+            {
+                Title = "Google Scholar",
+                ActionKeyword = "sc",
+                Icon = "google.png",
+                Url = "https://scholar.google.com/scholar?q={q}",
+                Enabled = true
+            },
+            new SearchSource
+            {
+                Title = "Wikipedia",
+                ActionKeyword = "wiki",
+                Icon = "wiki.png",
+                Url = "https://en.wikipedia.org/wiki/{q}",
+                Enabled = true
+            },
+            new SearchSource
+            {
+                Title = "FindIcon",
+                ActionKeyword = "findicon",
+                Icon = "pictures.png",
+                Url = "http://findicons.com/search/{q}",
+                Enabled = true
+            },
+            new SearchSource
+            {
+                Title = "Facebook",
+                ActionKeyword = "facebook",
+                Icon = "facebook.png",
+                Url = "https://www.facebook.com/search/?q={q}",
+                Enabled = true
+            },
+            new SearchSource
+            {
+                Title = "Twitter",
+                ActionKeyword = "twitter",
+                Icon = "twitter.png",
+                Url = "https://twitter.com/search?q={q}",
+                Enabled = true
+            },
+            new SearchSource
+            {
+                Title = "Google Maps",
+                ActionKeyword = "maps",
+                Icon = "google_maps.png",
+                Url = "https://maps.google.com/maps?q={q}",
+                Enabled = true
+            },
+            new SearchSource
+            {
+                Title = "Google Translate",
+                ActionKeyword = "translate",
+                Icon = "google_translate.png",
+                Url = "https://translate.google.com/#auto|en|{q}",
+                Enabled = true
+            },
+            new SearchSource
+            {
+                Title = "DuckDuckGo",
+                ActionKeyword = "duckduckgo",
+                Icon = "duckduckgo.png",
+                Url = "https://duckduckgo.com/?q={q}",
+                Enabled = true
+            },
+            new SearchSource
+            {
+                Title = "GitHub",
+                ActionKeyword = "github",
+                Icon = "github.png",
+                Url = "https://github.com/search?q={q}",
+                Enabled = true
+            },
+            new SearchSource
+            {
+                Title = "GitHub Gist",
+                ActionKeyword = "gist",
+                Icon = "gist.png",
+                Url = "https://gist.github.com/search?q={q}",
+                Enabled = true
+            },
+            new SearchSource
+            {
+                Title = "Gmail",
+                ActionKeyword = "gmail",
+                Icon = "gmail.png",
+                Url = "https://mail.google.com/mail/ca/u/0/#apps/{q}",
+                Enabled = true
+            },
+            new SearchSource
+            {
+                Title = "Google Drive",
+                ActionKeyword = "drive",
+                Icon = "google_drive.png",
+                Url = "https://drive.google.com/?hl=en&tab=bo#search/{q}",
+                Enabled = true
+            },
+            new SearchSource
+            {
+                Title = "WolframAlpha",
+                ActionKeyword = "wolframalpha",
+                Icon = "wolframalpha.png",
+                Url = "https://www.wolframalpha.com/input/?i={q}",
+                Enabled = true
+            },
+            new SearchSource
+            {
+                Title = "Stack Overflow",
+                ActionKeyword = "stackoverflow",
+                Icon = "stackoverflow.png",
+                Url = "https://stackoverflow.com/search?q={q}",
+                Enabled = true
+            },
+            new SearchSource
+            {
+                Title = "I'm Feeling Lucky",
+                ActionKeyword = "lucky",
+                Icon = "google.png",
+                Url = "https://google.com/search?q={q}&btnI=I",
+                Enabled = true
+            },
+            new SearchSource
+            {
+                Title = "Google Images",
+                ActionKeyword = "image",
+                Icon = "google.png",
+                Url = "https://www.google.com/search?q={q}&tbm=isch",
+                Enabled = true
+            },
+            new SearchSource
+            {
+                Title = "YouTube",
+                ActionKeyword = "youtube",
+                Icon = "youtube.png",
+                Url = "https://www.youtube.com/results?search_query={q}",
+                Enabled = true
+            },
+            new SearchSource
+            {
+                Title = "Bing",
+                ActionKeyword = "bing",
+                Icon = "bing.png",
+                Url = "https://www.bing.com/search?q={q}",
+                Enabled = true
+            },
+            new SearchSource
+            {
+                Title = "Yahoo",
+                ActionKeyword = "yahoo",
+                Icon = "yahoo.png",
+                Url = "https://www.search.yahoo.com/search?p={q}",
+                Enabled = true
+            },
+            new SearchSource
+            {
+                Title = "Baidu",
+                ActionKeyword = "bd",
+                Icon = "baidu.png",
+                Url = "https://www.baidu.com/#ie=UTF-8&wd={q}",
+                Enabled = true
+            }
+        };
+
+        [JsonIgnore]
+        public SearchSource SelectedSearchSource { get; set; }
+
+        private bool enableSuggestion;
+        public bool EnableSuggestion
+        {
+            get => enableSuggestion;
+            set
+            {
+                if (enableSuggestion != value)
+                {
+                    enableSuggestion = value;
+                    OnPropertyChanged(nameof(EnableSuggestion));
+                }
+            }
+        }
+
+        private int maxSuggestions = 1;
+        public int MaxSuggestions
+        {
+            get => maxSuggestions;
+            set
+            {
+                if (value > 0 && value <= 1000)
+                {
+                    if (maxSuggestions != value)
+                    {
+                        maxSuggestions = value;
+                        OnPropertyChanged();
+                    }
+                }
+            }
+        }
+
+        [JsonIgnore]
+        public SuggestionSource[] Suggestions { get; set; } = {
+            new Google(),
+            new Baidu(),
+            new Bing(),
+            new DuckDuckGo()
+        };
+
+        [JsonIgnore]
+        public SuggestionSource SelectedSuggestion { get; set; }
+
+        /// <summary>
+        /// used to store Settings.json only
+        /// </summary>
+        public string Suggestion
+        {
+            get { return SelectedSuggestion.ToString(); }
+            set
+            {
+                foreach (var s in Suggestions)
+                {
+                    if (string.Equals(s.ToString(), value, StringComparison.OrdinalIgnoreCase))
+                    {
+                        SelectedSuggestion = s;
+                    }
+                }
+            }
+        }
+    }
+}

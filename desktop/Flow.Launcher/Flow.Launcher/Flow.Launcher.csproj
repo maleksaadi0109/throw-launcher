@@ -1,0 +1,198 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>false</UseWindowsForms>
+    <StartupObject>Flow.Launcher.App</StartupObject>
+    <ApplicationIcon>Resources\app.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>portable</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>..\Output\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+    <UseVSHostingProcess>true</UseVSHostingProcess>
+    <Prefer32Bit>false</Prefer32Bit>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>..\Output\Release\</OutputPath>
+    <DefineConstants>TRACE;RELEASE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+    <Prefer32Bit>false</Prefer32Bit>
+    <NoWarn>$(NoWarn);FLSG0007</NoWarn>
+  </PropertyGroup>
+
+  <Target Name="RemoveUnnecessaryRuntimesAfterBuild" AfterTargets="Build">
+    <RemoveDir Directories="$(OutputPath)runtimes\browser-wasm;
+                            $(OutputPath)runtimes\linux-arm;
+                            $(OutputPath)runtimes\linux-arm64;
+                            $(OutputPath)runtimes\linux-armel;
+                            $(OutputPath)runtimes\linux-mips64;
+                            $(OutputPath)runtimes\linux-musl-arm;
+                            $(OutputPath)runtimes\linux-musl-arm64;
+                            $(OutputPath)runtimes\linux-musl-x64;
+                            $(OutputPath)runtimes\linux-musl-s390x;
+                            $(OutputPath)runtimes\linux-ppc64le;
+                            $(OutputPath)runtimes\linux-s390x;
+                            $(OutputPath)runtimes\linux-x64;
+                            $(OutputPath)runtimes\linux-x86;
+                            $(OutputPath)runtimes\maccatalyst-arm64;
+                            $(OutputPath)runtimes\maccatalyst-x64;
+                            $(OutputPath)runtimes\osx;
+                            $(OutputPath)runtimes\osx-arm64;
+                            $(OutputPath)runtimes\osx-x64;
+                            $(OutputPath)runtimes\win-arm;
+                            $(OutputPath)runtimes\win-arm64;"/>
+  </Target>
+
+  <Target Name="RemoveUnnecessaryRuntimesAfterPublish" AfterTargets="Publish">
+    <RemoveDir Directories="$(PublishDir)runtimes\browser-wasm;
+                            $(PublishDir)runtimes\linux-arm;
+                            $(PublishDir)runtimes\linux-arm64;
+                            $(PublishDir)runtimes\linux-armel;
+                            $(PublishDir)runtimes\linux-mips64;
+                            $(PublishDir)runtimes\linux-musl-arm;
+                            $(PublishDir)runtimes\linux-musl-arm64;
+                            $(PublishDir)runtimes\linux-musl-x64;
+                            $(PublishDir)runtimes\linux-musl-s390x;
+                            $(PublishDir)runtimes\linux-ppc64le;
+                            $(PublishDir)runtimes\linux-s390x;
+                            $(PublishDir)runtimes\linux-x64;
+                            $(PublishDir)runtimes\linux-x86;
+                            $(PublishDir)runtimes\maccatalyst-arm64;
+                            $(PublishDir)runtimes\maccatalyst-x64;
+                            $(PublishDir)runtimes\osx;
+                            $(PublishDir)runtimes\osx-arm64;
+                            $(PublishDir)runtimes\osx-x64;
+                            $(PublishDir)runtimes\win-arm;
+                            $(PublishDir)runtimes\win-arm64;"/>
+  </Target>
+
+  <ItemGroup>
+    <ApplicationDefinition Remove="App.xaml" />
+  </ItemGroup>
+  
+  <ItemGroup>
+    <Page Include="App.xaml" />
+  </ItemGroup>
+  
+  <ItemGroup>
+    <Page Remove="Themes\ThemeBuilder\Template.xaml" />
+  </ItemGroup>
+  
+  <ItemGroup>
+    <Compile Include="..\SolutionAssemblyInfo.cs" Link="Properties\SolutionAssemblyInfo.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Languages\*.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Images\*.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Images\*.svg">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+	  <Content Include="Images\*.ico">
+		  <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+	  </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Themes\*.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Resources\SegoeFluentIcons.ttf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ChefKeys" Version="0.1.2" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+    <PackageReference Include="Flow.Launcher.Localization" Version="0.0.6" />
+    <PackageReference Include="Fody" Version="6.9.3">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="AvalonEdit" Version="6.3.0.90" />
+    <PackageReference Include="iNKORE.UI.WPF.Modern" Version="0.10.1" />
+    <PackageReference Include="MdXaml" Version="1.27.0" />
+    <PackageReference Include="MdXaml.AnimatedGif" Version="1.27.0" />
+    <PackageReference Include="MdXaml.Html" Version="1.27.0" />
+    <PackageReference Include="MdXaml.Plugins" Version="1.27.0" />
+    <PackageReference Include="MdXaml.Svg" Version="1.27.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.9" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.9" />
+    <PackageReference Include="Microsoft.Toolkit.Uwp.Notifications" Version="7.1.3" />
+    <PackageReference Include="PropertyChanged.Fody" Version="4.1.0">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="SemanticVersioning" Version="3.0.0" />
+    <PackageReference Include="TaskScheduler" Version="2.12.2" />
+    <PackageReference Include="VirtualizingWrapPanel" Version="2.3.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Flow.Launcher.Core\Flow.Launcher.Core.csproj" />
+    <ProjectReference Include="..\Flow.Launcher.Infrastructure\Flow.Launcher.Infrastructure.csproj" />
+    <ProjectReference Include="..\Flow.Launcher.Plugin\Flow.Launcher.Plugin.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <FLLUseDependencyInjection>true</FLLUseDependencyInjection>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="Resources\open.wav">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Resources\dev.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Resources\double_pinyin.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Resources\polyphonic_pinyin.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <Target Name="PreBuild" BeforeTargets="PreBuildEvent" Condition="'$(OS)' == 'Windows_NT' and '$(SkipLauncherTermination)' != 'true'">
+    <Exec Command="taskkill /f /fi &quot;IMAGENAME eq Flow.Launcher.exe&quot;" />
+  </Target>
+  
+  <Target Name="RemoveDuplicateAnalyzers" BeforeTargets="CoreCompile">
+    <!-- Workaround https://github.com/dotnet/wpf/issues/6792 -->
+    <ItemGroup>
+      <FilteredAnalyzer Include="@(Analyzer-&gt;Distinct())" />
+      <Analyzer Remove="@(Analyzer)" />
+      <Analyzer Include="@(FilteredAnalyzer)" />
+    </ItemGroup>
+  </Target>
+</Project>
