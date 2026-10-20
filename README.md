@@ -5,7 +5,7 @@
 <h1 align="center">Throw Launcher</h1>
 <p align="center"><strong>A Windows launcher with more control over what stays in memory.</strong></p>
 <p align="center">
-  <img alt="Windows build not yet verified" src="https://img.shields.io/badge/Windows_build-not_yet_verified-FD662B" />
+  <a href="https://github.com/maleksaadi0109/throw-launcher/actions/workflows/flow-lite-windows.yml"><img alt="Windows build" src="https://github.com/maleksaadi0109/throw-launcher/actions/workflows/flow-lite-windows.yml/badge.svg" /></a>
   <img alt="Windows x64" src="https://img.shields.io/badge/platform-Windows_x64-122021" />
   <img alt="Experimental" src="https://img.shields.io/badge/status-experimental-FD662B" />
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-122021" /></a>
@@ -40,14 +40,13 @@ startup path unless they explicitly declare compatibility.
 
 There is no signed installer or stable Throw Launcher release yet.
 
-**Windows automation is not activated yet:** GitHub accepted the application
-source but rejected uploading `.github/workflows` through the current
-connection. The [workflow template](build-support/flow-lite-windows.yml) is
-provided as a normal source file. Once uploaded to
-`.github/workflows/flow-lite-windows.yml` with sufficient GitHub permission, a
-successful run will contain a `throw-launcher-windows` artifact.
+Open the [Windows build workflow](https://github.com/maleksaadi0109/throw-launcher/actions/workflows/flow-lite-windows.yml)
+and choose a successful run. Download its `throw-launcher-windows` artifact,
+extract the portable package into a fresh folder, and run `Throw.Launcher.exe`.
+The package uses its own `ThrowData` profile. A successful build is not proof
+of a 50 MB memory footprint or complete interactive UI verification.
 
-Until then, build the source:
+Or build the source:
 
 ### Requirements
 

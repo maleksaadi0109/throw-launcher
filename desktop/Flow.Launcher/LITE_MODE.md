@@ -43,7 +43,7 @@ working-set trimming or silent disabling of search features is used.
 
 ## Use
 
-Open **Settings → Essentials → Keep it light**. Lite mode is enabled by default in this
+Open **Control Center → Workspace → Lite mode**. Lite mode is enabled by default in this
 fork. Turn it off and restart for the original startup/cache/row behavior.
 Existing animation, plugin-enabled, keyword, theme and search-delay preferences
 are not rewritten.
