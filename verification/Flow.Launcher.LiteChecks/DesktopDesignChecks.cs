@@ -76,6 +76,9 @@ internal static class DesktopDesignChecks
             "Simplified About does not offer to replace the fork with upstream updates.");
         Check(project.Descendants().Any(e => e.Name.LocalName == "AssemblyName" &&
               e.Value == "Throw.Launcher"), "Independent executable assembly name is Throw.Launcher.");
+        Check(File.ReadAllText(Path.Combine(app, "LocalizationAlias.cs")).Contains(
+            "global using Localize = global::Throw.Launcher.Localize;"),
+            "Application translations resolve the generator's independent assembly namespace.");
         var dataLocation = File.ReadAllText(Path.Combine(app, "..",
             "Flow.Launcher.Infrastructure", "UserSettings", "DataLocation.cs"));
         Check(dataLocation.Contains("\"ThrowLauncher\"") && dataLocation.Contains("\"ThrowData\"") &&
