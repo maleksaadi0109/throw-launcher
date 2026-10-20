@@ -4,6 +4,7 @@ using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Markup;
+using System.Xml.Linq;
 using Flow.Launcher.Infrastructure;
 using Flow.Launcher.Resources.Controls;
 using NUnit.Framework;
@@ -23,8 +24,16 @@ public class ThemeRuntimeTests
     {
         var path = Path.Combine(Constant.ProgramDirectory, "Themes", "Base.xaml");
         Assert.That(File.Exists(path), Is.True, "Test the actual copied runtime theme.");
-        using var stream = File.OpenRead(path);
-        var dictionary = (ResourceDictionary)XamlReader.Load(stream);
+        var source = XDocument.Load(path);
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+        // The real app supplies this ambient accent through App.xaml's
+        // ThemeResources. Supply it locally without booting application
+        // services or changing the copied theme or its control template.
+        source.Root!.AddFirst(new XElement(presentation + "SolidColorBrush",
+            new XAttribute(xaml + "Key", "SystemAccentColorLight1Brush"),
+            new XAttribute("Color", "#FD662B")));
+        var dictionary = (ResourceDictionary)XamlReader.Parse(source.ToString());
         var style = (Style)dictionary["BaseListboxStyle"];
         var setter = style.Setters.OfType<Setter>()
             .Single(value => value.Property == Control.TemplateProperty);
