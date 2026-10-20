@@ -79,6 +79,9 @@ internal static class DesktopDesignChecks
         Check(File.ReadAllText(Path.Combine(app, "LocalizationAlias.cs")).Contains(
             "global using Localize = global::Throw.Launcher.Localize;"),
             "Application translations resolve the generator's independent assembly namespace.");
+        Check(File.ReadAllText(Path.Combine(app, "LocalizationAlias.cs")).Contains(
+            "global using PublicApi = global::Throw.Launcher.PublicApi;"),
+            "Generated API helpers resolve the independent application assembly namespace.");
         var dataLocation = File.ReadAllText(Path.Combine(app, "..",
             "Flow.Launcher.Infrastructure", "UserSettings", "DataLocation.cs"));
         Check(dataLocation.Contains("\"ThrowLauncher\"") && dataLocation.Contains("\"ThrowData\"") &&
