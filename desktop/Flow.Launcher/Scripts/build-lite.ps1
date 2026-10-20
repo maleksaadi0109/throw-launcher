@@ -39,9 +39,9 @@ try {
     if ($version.FileDescription -ne "Throw Launcher" -or $version.ProductName -ne "Throw Launcher") {
         throw "Published executable has stale Windows branding. No ZIP will be created."
     }
-    $runtime = Get-Content (Join-Path $staging "Flow.Launcher.runtimeconfig.json") -Raw | ConvertFrom-Json
+    $runtimeConfig = Get-Content (Join-Path $staging "Flow.Launcher.runtimeconfig.json") -Raw | ConvertFrom-Json
     if ($MemoryProfile -eq "Compact") {
-        $config = $runtime.runtimeOptions.configProperties
+        $config = $runtimeConfig.runtimeOptions.configProperties
         if ($config.'System.GC.ConserveMemory' -ne 9 -or $config.'System.GC.Server' -ne $false) {
             throw "Compact runtime settings were not included. No ZIP will be created."
         }
