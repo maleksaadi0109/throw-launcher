@@ -7,11 +7,6 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../desktop/Flow.Launcher/Flow.Launcher.Core/Plugin/DeferredPluginInitialization.cs" Link="DeferredPluginInitialization.cs" />
-    <Reference Include="Microsoft.CodeAnalysis">
-      <HintPath>$(MSBuildSDKsPath)/../Roslyn/bincore/Microsoft.CodeAnalysis.dll</HintPath>
-    </Reference>
-    <Reference Include="Microsoft.CodeAnalysis.CSharp">
-      <HintPath>$(MSBuildSDKsPath)/../Roslyn/bincore/Microsoft.CodeAnalysis.CSharp.dll</HintPath>
-    </Reference>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.12.0" />
   </ItemGroup>
 </Project>
