@@ -32,10 +32,12 @@ impl Drop for OwnedIcon {
 }
 
 fn extract(path: &Path) -> Option<OwnedIcon> {
+    // Shell APIs are stricter about separators than ordinary Win32 file APIs.
+    let normalized: PathBuf = path.components().collect();
     let mut info: SHFILEINFOW = unsafe { zeroed() };
     let result = unsafe {
         SHGetFileInfoW(
-            wide(path).as_ptr(),
+            wide(normalized).as_ptr(),
             0,
             &mut info,
             size_of::<SHFILEINFOW>() as u32,

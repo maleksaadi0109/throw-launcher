@@ -27,7 +27,24 @@ pub(super) unsafe fn verify_and_capture(root: &Path) -> Result<(), String> {
             break;
         }
         if Instant::now() >= deadline {
-            return Err("Real Shell icons did not reach the result list.".into());
+            let missing = APP.with(|cell| {
+                let slot = cell.borrow();
+                let app = slot.as_ref().unwrap();
+                app.entries
+                    .iter()
+                    .filter(|entry| {
+                        app.icons
+                            .as_ref()
+                            .and_then(|icons| icons.get(&entry.path))
+                            .is_none()
+                    })
+                    .map(|entry| format!("{} (exists: {})", entry.name, entry.path.is_file()))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            });
+            return Err(format!(
+                "Real Shell icons did not reach the result list: {missing}"
+            ));
         }
         std::thread::sleep(Duration::from_millis(15));
     }

@@ -1284,11 +1284,12 @@ unsafe fn run_native() -> Result<(), String> {
             DestroyWindow(app.settings_hwnd); app.settings_hwnd = null_mut();
             // Real Shell icons, but no applications are executed by the test.
             let windows = PathBuf::from(std::env::var_os("SystemRoot").ok_or("SystemRoot is missing")?);
-            app.entries = vec![
-                Entry { name: "Notepad".into(), path: windows.join("System32/notepad.exe") },
+            app.entries = [
+                Entry { name: "Notepad".into(), path: windows.join("System32").join("notepad.exe") },
                 Entry { name: "File Explorer".into(), path: windows.join("explorer.exe") },
-                Entry { name: "Throw Launcher".into(), path: std::env::current_exe().map_err(|e| e.to_string())? },
-            ];
+                Entry { name: "Command Prompt".into(), path: windows.join("System32").join("cmd.exe") },
+            ].into_iter().filter(|entry| entry.path.is_file()).take(2).collect();
+            app.entries.push(Entry { name: "Throw Launcher".into(), path: std::env::current_exe().map_err(|e| e.to_string())? });
             app.settings.hide_on_focus_loss = false;
             SetWindowTextW(app.edit, wide("").as_ptr());
             app.refresh();
