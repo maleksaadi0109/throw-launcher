@@ -1,5 +1,5 @@
-//! Original, scale-independent GDI line icons for launcher commands.
-//! No embedded assets or icon resources are used.
+//! Original semantic marks, rasterized at 4x and area-filtered by GDI.
+//! No icon fonts, embedded command assets, or additional runtime are needed.
 use super::*;
 use throw_launcher::commands::{SettingsPage, SystemCommand, UtilityCommand};
 
@@ -8,6 +8,7 @@ enum Mark {
     Power,
     Restart,
     Recovery,
+    Reindex,
     Logout,
     Lock,
     Moon,
@@ -46,7 +47,7 @@ fn action_mark(action: &Action) -> Option<Mark> {
             _ => return None,
         },
         Action::Settings => Mark::Settings,
-        Action::Reindex => Mark::Recovery,
+        Action::Reindex => Mark::Reindex,
         Action::Quit => Mark::Logout,
         _ => return None,
     })
@@ -85,37 +86,47 @@ unsafe fn ellipse(dc: HDC, tile: RECT, side: i32, bounds: (i32, i32, i32, i32)) 
 }
 
 unsafe fn arc(dc: HDC, tile: RECT, side: i32, cx: i32, cy: i32, radius: i32, start: i32, end: i32) {
-    let mut points = Vec::with_capacity(((end - start).unsigned_abs() / 12 + 2) as usize);
-    for degrees in (start..=end).step_by(12) {
-        let radians = degrees as f64 * std::f64::consts::PI / 180.0;
-        points.push((
-            cx + (radians.cos() * radius as f64).round() as i32,
-            cy + (radians.sin() * radius as f64).round() as i32,
-        ));
+    // Do not quantize curves onto the 32-unit design grid before scaling.
+    // Subpixel geometry must survive until the supersampled raster is drawn.
+    let origin = coord(tile, side, 0, 0);
+    let scale = side as f64 / 32.0;
+    let sweep = (end - start) as f64;
+    let length = sweep.to_radians().abs() * radius as f64 * scale;
+    let segments = (length / 2.0).ceil().clamp(8.0, 512.0) as usize;
+    for step in 0..=segments {
+        let angle = (start as f64 + sweep * step as f64 / segments as f64).to_radians();
+        let x = origin.x + ((cx as f64 + angle.cos() * radius as f64) * scale).round() as i32;
+        let y = origin.y + ((cy as f64 + angle.sin() * radius as f64) * scale).round() as i32;
+        if step == 0 {
+            MoveToEx(dc, x, y, null_mut());
+        } else {
+            LineTo(dc, x, y);
+        }
     }
-    let radians = end as f64 * std::f64::consts::PI / 180.0;
-    points.push((
-        cx + (radians.cos() * radius as f64).round() as i32,
-        cy + (radians.sin() * radius as f64).round() as i32,
-    ));
-    stroke(dc, tile, side, &points, false);
 }
 
 unsafe fn draw_mark(dc: HDC, tile: RECT, side: i32, mark: Mark) {
     match mark {
         Mark::Power => {
             // A broken ring and independent stem read cleanly even at small sizes.
-            arc(dc, tile, side, 16, 17, 11, 38, 245);
-            arc(dc, tile, side, 16, 17, 11, 295, 398);
+            arc(dc, tile, side, 16, 17, 11, -48, 228);
             stroke(dc, tile, side, &[(16, 4), (16, 17)], false);
         }
         Mark::Restart | Mark::Recovery => {
             arc(dc, tile, side, 16, 16, 11, 42, 330);
-            stroke(dc, tile, side, &[(20, 7), (26, 10), (20, 14)], false);
+            stroke(dc, tile, side, &[(20, 7), (26, 10), (24, 16)], false);
             if matches!(mark, Mark::Recovery) {
                 stroke(dc, tile, side, &[(16, 12), (16, 20)], false);
                 stroke(dc, tile, side, &[(12, 16), (20, 16)], false);
             }
+        }
+        Mark::Reindex => {
+            // Paired refresh arrows, rather than Restart's single arrow or
+            // advanced recovery's cross. Recognizable without a text glyph.
+            arc(dc, tile, side, 16, 16, 11, 210, 350);
+            stroke(dc, tile, side, &[(23, 9), (27, 14), (21, 15)], false);
+            arc(dc, tile, side, 16, 16, 11, 30, 170);
+            stroke(dc, tile, side, &[(9, 23), (5, 18), (11, 17)], false);
         }
         Mark::Logout => {
             stroke(
@@ -260,23 +271,117 @@ unsafe fn draw_mark(dc: HDC, tile: RECT, side: i32, mark: Mark) {
     }
 }
 
+/// Delete the DC first: this releases its selections before owned GDI objects.
+/// Partial construction and every failure path use the same cleanup.
+struct Raster {
+    dc: HDC,
+    bitmap: HBITMAP,
+    pen: HPEN,
+}
+
+impl Drop for Raster {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.dc.is_null() {
+                DeleteDC(self.dc);
+            }
+            if !self.bitmap.is_null() {
+                DeleteObject(self.bitmap);
+            }
+            if !self.pen.is_null() {
+                DeleteObject(self.pen);
+            }
+        }
+    }
+}
+
+fn selected(object: HGDIOBJ) -> bool {
+    !object.is_null() && object as isize != -1
+}
+
 unsafe fn paint(dc: HDC, tile: RECT, size: i32, color: u32, mark: Mark) {
-    if dc.is_null() {
+    let width = tile.right.saturating_sub(tile.left);
+    let height = tile.bottom.saturating_sub(tile.top);
+    if dc.is_null() || size <= 0 || width <= 0 || height <= 0 {
         return;
     }
-    let available = (tile.right - tile.left).min(tile.bottom - tile.top).max(1);
-    let side = size.max(1).min(available);
+    let side = size.min(width).min(height);
+    let left = tile.left.saturating_add((width - side) / 2);
+    let top = tile.top.saturating_add((height - side) / 2);
+    // At 800% DPI the normal 32px tile is 256px. Even unexpected larger
+    // requests cannot allocate more than a 1024-square compatible bitmap.
+    let raster_side = side.min(256) * 4;
+    let mut raster = Raster {
+        dc: CreateCompatibleDC(dc),
+        bitmap: null_mut(),
+        pen: null_mut(),
+    };
+    if raster.dc.is_null() {
+        return;
+    }
+    raster.bitmap = CreateCompatibleBitmap(dc, raster_side, raster_side);
+    raster.pen = CreatePen(PS_SOLID, ((raster_side * 7 + 64) / 128).max(1), color);
+    if raster.bitmap.is_null() || raster.pen.is_null() {
+        return;
+    }
+    if !selected(SelectObject(raster.dc, raster.bitmap))
+        || !selected(SelectObject(raster.dc, raster.pen))
+        || !selected(SelectObject(raster.dc, GetStockObject(HOLLOW_BRUSH)))
+    {
+        return;
+    }
+    // Preserve the actual painted tile, including rounded corners and the
+    // selected row behind it. Never guess a theme color or flatten the tile.
+    if SetStretchBltMode(raster.dc, COLORONCOLOR) == 0
+        || StretchBlt(
+            raster.dc,
+            0,
+            0,
+            raster_side,
+            raster_side,
+            dc,
+            left,
+            top,
+            side,
+            side,
+            SRCCOPY,
+        ) == 0
+    {
+        return;
+    }
+    draw_mark(
+        raster.dc,
+        RECT {
+            left: 0,
+            top: 0,
+            right: raster_side,
+            bottom: raster_side,
+        },
+        raster_side,
+        mark,
+    );
     let saved = SaveDC(dc);
-    let pen = CreatePen(PS_SOLID, (side / 16).max(1), color);
-    if pen.is_null() {
-        RestoreDC(dc, saved);
+    if saved == 0 {
         return;
     }
-    SelectObject(dc, pen);
-    SelectObject(dc, GetStockObject(HOLLOW_BRUSH));
-    draw_mark(dc, tile, side, mark);
+    // HALFTONE integrates high-resolution stroke coverage into destination
+    // pixels; COLORONCOLOR here would simply reintroduce jagged edges.
+    if SetStretchBltMode(dc, HALFTONE) != 0 && SetBrushOrgEx(dc, 0, 0, null_mut()) != 0 {
+        StretchBlt(
+            dc,
+            left,
+            top,
+            side,
+            side,
+            raster.dc,
+            0,
+            0,
+            raster_side,
+            raster_side,
+            SRCCOPY,
+        );
+    }
     RestoreDC(dc, saved);
-    DeleteObject(pen);
 }
 
 /// Draw a supported launcher action and return whether it had an original icon.

@@ -1661,6 +1661,20 @@ unsafe fn run_native() -> Result<(), String> {
     );
     let _shell = ShellApartment::initialize()?;
     let args: Vec<_> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|arg| arg == "--configure-install") {
+        let choices = throw_launcher::install::Choices::parse(&args[1..])?;
+        let mutex = CreateMutexW(null(), 0, wide("Local\\ThrowLauncherRust").as_ptr());
+        if mutex.is_null() {
+            return Err("Cannot lock the profile for installation.".into());
+        }
+        if GetLastError() == ERROR_ALREADY_EXISTS {
+            CloseHandle(mutex);
+            return Err("Quit Throw from its tray menu before changing setup preferences.".into());
+        }
+        let result = (|| choices.save(&profile(false)?.join("settings.json")))();
+        CloseHandle(mutex);
+        return result;
+    }
     if args.iter().any(|a| {
         ![
             "--portable",

@@ -24,7 +24,27 @@ An experimental Windows launcher rebuilt in Rust with **native Win32 controls**.
 No WPF, .NET runtime, Electron, WebView2, browser process, or background telemetry.
 The existing C# edition is preserved alongside this version.
 
-## Run
+## Install with the setup wizard
+
+Download **throw-launcher-installer-x64** from a successful
+[Windows build](https://github.com/maleksaadi0109/throw-launcher/actions/workflows/throw-rust-windows.yml),
+extract the artifact, and run **Throw-Launcher-Setup-x64.exe**.
+This is a real per-user installer, not the portable launcher renamed to “Setup”.
+It installs to `%LOCALAPPDATA%\Programs\Throw Launcher` by default and lets you
+choose another folder.
+
+Setup offers Windows sign-in startup (off by default), an optional desktop
+shortcut, Pearl/Graphite appearance, the global shortcut, Lite mode, focus-loss
+behavior, and local launch history. These choices are saved before first launch.
+Existing profiles are preserved on upgrades unless you explicitly ask to apply
+new preferences. The finishing screen can open Throw immediately.
+
+Uninstall through Windows Installed apps. Program files, shortcuts and this
+installation's startup registration are removed; personal preferences in
+`%APPDATA%\ThrowLauncherRust` are retained. Close an older running copy via
+**tray → Quit** before installing. The preview installer is unsigned.
+
+## Run without installing
 
 Download `throw-rust-windows-x64` from a successful run of the
 [Rust Windows workflow](https://github.com/maleksaadi0109/throw-launcher/actions/workflows/throw-rust-windows.yml).

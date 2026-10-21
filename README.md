@@ -1,185 +1,123 @@
-> **Native Rust edition:** a separate low-overhead Windows implementation is
-> available in [desktop/throw-rust](desktop/throw-rust/README.md).
-> It has its own executable/profile and does not load .NET plugins.
-> The existing C# edition remains intact. See the
-> [Rust Windows builds](https://github.com/maleksaadi0109/throw-launcher/actions/workflows/throw-rust-windows.yml)
-> for preview packages. A 50 MB RAM footprint is not guaranteed.
-
-<p align="center">
-  <img src="branding/throw-launcher.png" width="128" height="128" alt="Throw Launcher logo" />
-</p>
-
+<p align="center"><img src="branding/throw-launcher.png" width="112" alt="Throw Launcher logo"></p>
 <h1 align="center">Throw Launcher</h1>
-<p align="center"><strong>A Windows launcher with more control over what stays in memory.</strong></p>
+<p align="center">Your apps. Your files. One shortcut.</p>
 <p align="center">
-  <a href="https://github.com/maleksaadi0109/throw-launcher/actions/workflows/flow-lite-windows.yml"><img alt="Windows build" src="https://github.com/maleksaadi0109/throw-launcher/actions/workflows/flow-lite-windows.yml/badge.svg" /></a>
-  <img alt="Windows x64" src="https://img.shields.io/badge/platform-Windows_x64-122021" />
-  <img alt="Experimental" src="https://img.shields.io/badge/status-experimental-FD662B" />
-  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-122021" /></a>
+  <a href="https://github.com/maleksaadi0109/throw-launcher/actions/workflows/throw-rust-windows.yml"><img alt="Windows build" src="https://github.com/maleksaadi0109/throw-launcher/actions/workflows/throw-rust-windows.yml/badge.svg"></a>
+  <img alt="Windows x64" src="https://img.shields.io/badge/Windows-x64-1234C5">
+  <img alt="Native Rust" src="https://img.shields.io/badge/Rust-native-24262C">
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-24262C"></a>
 </p>
 
-Throw Launcher is an independent, lightweight-focused development fork of
-[Flow Launcher](https://github.com/Flow-Launcher/Flow.Launcher). It keeps the
-original keyboard-first application and plugin architecture, adding reversible
-resource controls rather than replacing the launcher with a web wrapper.
+**Throw is a lightweight-focused Windows launcher built in Rust with native
+Windows controls.** Search apps, folders and indexed files, perform quick
+calculations, search the web, and run Windows commands without opening a large
+dashboard. No Electron, WebView, .NET runtime, or background telemetry process.
 
-> **Development build, not a production release.** Windows runtime verification
-> and before/after memory benchmarks are not complete. Smaller cache limits are
-> implementation choices—not measured proof of a particular RAM saving.
+> **Preview software:** the native edition is actively developed. It does not
+> yet support Flow Launcher plugins, and it does not promise a fixed 50 MB RAM
+> footprint. The installer is currently **unsigned**, not a signed stable release.
 
-## What is different?
+## Install Throw
 
-| Feature | Behavior |
+1. Open [Windows builds](https://github.com/maleksaadi0109/throw-launcher/actions/workflows/throw-rust-windows.yml)
+   and choose a **successful** run from `main`.
+2. Download **throw-launcher-installer-x64** from its Artifacts section
+   (GitHub may require you to sign in).
+3. Extract the download and run **Throw-Launcher-Setup-x64.exe**.
+4. Choose your installation folder and whether Throw should start when you
+   sign in to Windows. Desktop shortcuts are optional.
+5. Choose your appearance, keyboard shortcut, Lite mode, focus behavior, and
+   local launch-history preference. Finish setup and open Throw.
+
+The default location is `%LOCALAPPDATA%\Programs\Throw Launcher`.
+Installation is for your Windows account and does not require administrator
+rights or download an additional runtime.
+
+**Already running an older copy?** Use **tray icon → Quit** first. Closing the
+launcher window only hides it. The installer asks you to close a running copy
+before replacing its files.
+
+**Prefer portable?** Download **throw-rust-windows-x64**, extract
+`Throw-Rust-Windows-x64.zip`, and run `Throw.Rust.exe`. Add `--portable` to keep
+preferences in `ThrowRustData` beside the executable.
+
+Windows may display a reputation or publisher warning for unsigned preview
+builds. Only run a build from a source you trust; this project does not claim a
+verified publisher signature.
+
+## What you can do
+
+| Feature | How it works |
 | --- | --- |
-| **Reversible Lite mode** | Enabled by default in this fork. Turn it off and restart to restore the original resource policies without overwriting saved appearance or plugin preferences. |
-| **Smaller icon cache** | Defaults to 50 entries in Lite mode instead of the original 150. Choose 25, 50, 100 or 150. Essential fallback icons remain available. |
-| **Less startup image work** | Previously used icons are not preloaded in Lite mode unless you enable that option. Requested icons still load normally. |
-| **First-use plugins** | Calculator and URL opt into delayed assembly loading and initialization. They load on a normal query or when their settings are expanded. A global plugin can load on the first general search. |
-| **Reduced UI overhead** | Lite mode suppresses search-window animations and recycles result rows. Search result cloning retains its compatibility safeguards. |
-| **Resource reports** | Refresh memory, process, heap, icon-cache and plugin statistics only when needed. Copy the report or export it as a text file—no monitoring service. |
-| **Restart notices** | A notice appears when resource settings differ from the running profile. Reverting the changes clears it; the notice does not restart the app automatically. |
+| **Apps and folders** | Start typing a name. Use arrows, Enter, or Alt+1–9. |
+| **File search** | Type `file: invoice`. Uses the existing Windows Search catalog rather than a second whole-disk index. Windows Search must be available. |
+| **Quick calculations** | Type `= (12 + 3) * 2`, then Enter to copy the answer. |
+| **Web and bookmarks** | Type `? search terms` or a full URL. Browser bookmark discovery is opt-in; keyword web providers are configurable. |
+| **System commands** | Type `>` or search for Restart, Shut down, Lock, and other commands. Disruptive actions ask for confirmation. |
+| **Inline actions** | Right-click a result or press **Ctrl+K** in search. Filter actions, use Alt+numbers, then Esc/Back to return to your search. |
+| **File and web actions** | Open files, open their containing folder, copy paths, open URLs, or copy links. App-only elevation options are not shown for these results. |
+| **Native editing** | Ctrl+A, C, X, V and Z work in the search field. |
+| **Compact layout** | Three visible search rows, with scrolling for more; action panels show up to five rows. |
+| **Your appearance** | Pearl light and Graphite dark themes, antialiased command icons, and a multi-resolution Throw logo. |
 
-There are **no forced-GC timers, “RAM cleaner” tricks, or arbitrary plugin
-suspension**. Plugins with background responsibilities remain on the original
-startup path unless they explicitly declare compatibility.
+The default global shortcut is **Ctrl+Alt+Space**. Choose **Alt+Space** or
+**Ctrl+Shift+Space** during installation or in Settings. A shortcut can be
+unavailable if another app has already registered it; Throw reports that conflict.
 
-## Try a Windows test build
+## Designed to stay small
 
-There is no signed installer or stable Throw Launcher release yet.
+- Lite mode is enabled by default.
+- Application icons load on demand through a bounded background cache.
+- Original command icons use bounded, temporary supersampling for smooth edges
+  rather than loading a large image library.
+- Windows supplies application icons; older applications may only provide
+  low-resolution artwork.
+- File results reuse Windows Search. Its service cost is separate from Throw's
+  process memory and must be included when comparing total system resource use.
+- No forced garbage-collection loops or “RAM cleaner” tricks.
 
-Open the [Windows build workflow](https://github.com/maleksaadi0109/throw-launcher/actions/workflows/flow-lite-windows.yml)
-and choose a successful run. Download its `throw-launcher-windows` artifact,
-extract the portable package into a fresh folder, and run `Throw.Launcher.exe`.
-The package uses its own `ThrowData` profile. A successful build is not proof
-of a 50 MB memory footprint or complete interactive UI verification.
+CI packages include a memory sample and file-search evidence from a disposable
+Windows runner. These are measurements of that environment, **not a guarantee**
+for your PC, app collection, or search index.
 
-Or build the source:
+## Settings and upgrades
 
-### Requirements
+Open **Settings** from the launcher or tray menu. Preferences live in
+`%APPDATA%\ThrowLauncherRust`.
 
-- Windows x64.
-- [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0).
-- [PowerShell 7](https://github.com/PowerShell/PowerShell).
+Upgrades keep existing preferences unless you explicitly select **Apply the
+preferences below** in setup. Startup and shortcut choices remain visible in
+the installer. Uninstall through Windows **Installed apps → Throw Launcher**.
+Uninstallation removes the program, its shortcuts, and its own startup entry,
+but keeps your personal profile. It never removes Flow Launcher's profile.
 
-```powershell
-git clone https://github.com/maleksaadi0109/throw-launcher.git
-cd throw-launcher
-pwsh ./desktop/Flow.Launcher/Scripts/build-lite.ps1
-```
+## Build from source
 
-The script builds the solution and creates a self-contained portable test ZIP
-under `generated-artifacts/windows/`. It does not replace an installed profile,
-delete older test packages, or terminate a running launcher. Choose another
-`-OutputDirectory` if a package folder already exists.
-
-**Independent identity:** run `Throw.Launcher.exe`. Portable data lives in
-`ThrowData`; non-portable data lives in `%APPDATA%\\ThrowLauncher`. Throw has its
-own singleton and startup registration and does not modify Flow's profile.
-Fresh profiles use **Ctrl + Alt + Space**, avoiding Flow's default shortcut.
-Choose non-conflicting shortcuts if you run both apps. Upstream application
-installers are blocked; use a new Throw portable package for updates.
-
-**Optional import:** Control Center → Workspace → Import general preferences
-reads a selected Flow `Settings.json` without modifying it. Review confirmation
-before applying; Throw's previous saved settings are backed up. Only four
-boolean preferences are accepted: hide on startup, hide on focus loss, animation
-preference and accent matching. Lite remains on. Plugins, commands, credentials,
-paths, themes and shortcuts are not imported.
-
-## A distinct Throw interface
-
-The native launcher has a branded identity bar, a direct Settings button, and a
-rounded teal/orange **Throw** theme. Fresh profiles use Throw by default.
-Existing Throw profiles retain their chosen theme; select **Control Center →
-Appearance → Throw** to switch. Installed themes and text-size controls remain
-available in a new, simplified appearance page.
-
-Settings is a Throw **Control Center: Workspace, Appearance, Controls and About**. The Plugins,
-Plugin Store and Proxy sections are no longer in the navigation. Search engines
-and existing advanced preferences remain intact; hiding their settings does not
-remove app, file, calculator or URL search. The simplified headings are English;
-the language control still affects supported existing text and search features.
-
-The existing Throw T/arrow icon is used for the Windows executable, app windows
-and release tray icon. The executable is `Throw.Launcher.exe`, while internal
-plugin contracts retain compatible upstream namespaces. A new Windows build is required for these changes to appear
-in a downloaded executable; the package also includes `Throw-Launcher.ico`.
-
-## Use Lite mode
-
-Open **Settings → Essentials → Keep it light**, then restart after changing
-the switch. Advanced cache/preload and plugin-management controls are omitted
-from the simplified interface, while previously saved values are preserved.
-A mode switch does not unload assemblies that are already running.
-
-Open **Essentials → Resource details**, refresh a sample, then copy or export it.
-Reports contain resource statistics, not full logs or settings files. Review a
-report before sharing it publicly.
-
-## Verification and measurements
-
-Portable checks cover single initialization under concurrent searches,
-cancellation isolation, failure retention, source syntax, modified XML,
-simplified navigation, theme resource references and matching icon sources.
-These checks do not render the native UI or verify the icon embedded in a
-produced executable. Windows visual verification of the redesign is pending.
+On Windows with the Rust toolchain:
 
 ```powershell
-dotnet run --project verification/Flow.Launcher.LiteChecks -c Release
+cd desktop/throw-rust
+cargo test --locked
+cargo build --release --locked
+.\target\release\throw-rust.exe
 ```
 
-Focused Windows tests cover settings preservation, cache bounds, optional
-preloading, serialization and restart-state detection. The supplied Windows
-workflow is configured to run them after building the solution; it has not run yet.
+See the [native edition guide](desktop/throw-rust/README.md) for development,
+keyboard controls, limitations, and verification details.
+The [Windows workflow](.github/workflows/throw-rust-windows.yml) also builds the
+Inno Setup installer and checks its real wizard, saved choices, upgrades, and
+uninstallation on a disposable runner.
 
-For comparable idle measurements on Windows:
+## Editions and credits
 
-```powershell
-pwsh ./desktop/Flow.Launcher/Scripts/measure-lite.ps1 `
-  -LauncherProcessId 1234 -Mode lite -Seconds 60
-```
+- **`desktop/throw-rust`** — the current native Rust preview described above.
+- **`desktop/Flow.Launcher`** — the preserved C#/WPF development fork. Its engine
+  and plugin contracts are separate from the Rust rebuild.
 
-Replace `1234` with the launcher’s actual process ID. Repeat with `-Mode normal`
-after restarting with the same plugins, index and theme. Process-tree totals
-can include applications launched from the launcher and can count shared
-working-set pages more than once.
+Throw began as a fork of [Flow Launcher](https://github.com/Flow-Launcher/Flow.Launcher).
+Upstream licenses and notices are retained; original contributors deserve credit.
+The native edition uses its own executable, profile, logo, and command artwork.
+It is not affiliated with or endorsed by Flow Launcher, Apple, or Microsoft.
 
-See the [full measurement protocol](desktop/Flow.Launcher/LITE_MODE.md) before
-claiming a memory improvement. Search latency, especially on first use, matters
-alongside idle RAM.
-
-## Repository layout
-
-```text
-branding/                         New Throw Launcher logo: SVG, PNG, ICO
-desktop/Flow.Launcher/             Original desktop source and fork changes
-verification/                     Portable lifecycle and source checks
-build-support/                    Windows workflow template (not yet activated)
-generated-artifacts/              Ignored local packages and measurements
-```
-
-## Contributing
-
-Small, measurable changes are welcome. Keep normal mode available, preserve
-user preferences and avoid adding background work for optional features.
-Plugin lazy loading is opt-in: do not assume every plugin can safely be delayed.
-
-For a bug report, include Windows version, enabled plugins, normal/Lite mode,
-reproduction steps and a reviewed resource report if relevant. Never include
-passwords, access tokens or private settings.
-
-## Credits and license
-
-Based on **Flow Launcher**, originally downloaded from upstream revision
-`3b89277c65981c8228f2c0525270a5a716506cca`.
-Throw Launcher is an independent fork and is not an official Flow Launcher
-release or an endorsement by its maintainers.
-
-The original [MIT license](LICENSE), contributor credits and
-[third-party attribution](desktop/Flow.Launcher/attribution.md) are preserved.
-Upstream namespaces, plugin identifiers and much of the original documentation
-are intentionally retained.
-
-The new Throw Launcher mark is included in [branding](branding/README.md).
-No new email account or contact address is implied; use this repository’s
-[issues](https://github.com/maleksaadi0109/throw-launcher/issues).
+Licensed under [MIT](LICENSE). See the repository's preserved notices for
+third-party components.
