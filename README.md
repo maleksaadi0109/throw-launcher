@@ -1,3 +1,10 @@
+> **Native Rust edition:** a separate low-overhead Windows implementation is
+> available in [desktop/throw-rust](desktop/throw-rust/README.md).
+> It has its own executable/profile and does not load .NET plugins.
+> The existing C# edition remains intact. See the
+> [Rust Windows builds](https://github.com/maleksaadi0109/throw-launcher/actions/workflows/throw-rust-windows.yml)
+> for preview packages. A 50 MB RAM footprint is not guaranteed.
+
 <p align="center">
   <img src="branding/throw-launcher.png" width="128" height="128" alt="Throw Launcher logo" />
 </p>

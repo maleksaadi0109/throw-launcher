@@ -1,0 +1,111 @@
+# Throw Launcher — native Rust edition
+
+An experimental Windows launcher rebuilt in Rust with **native Win32 controls**.
+No WPF, .NET runtime, Electron, WebView2, browser process, or background telemetry.
+The existing C# edition is preserved alongside this version.
+
+## Run
+
+Download `throw-rust-windows-x64` from a successful run of the
+[Rust Windows workflow](https://github.com/maleksaadi0109/throw-launcher/actions/workflows/throw-rust-windows.yml).
+Extract the ZIP into a new folder and run **Throw.Rust.exe**.
+Windows may show a warning for this unsigned development executable.
+
+- **Ctrl + Alt + Space** opens/hides the launcher (change it in Settings).
+- Type an application name. Use Up/Down and Enter, or double-click.
+- `= (12 + 3) * 2` calculates; Enter copies the answer.
+- `? search terms` opens DuckDuckGo in the default browser.
+- An explicit `https://…` or `http://…` URL opens in the default browser.
+- `>` shows Settings, Rebuild app index, and Quit commands.
+- Escape and the close button hide the launcher. **Tray → Quit** exits it.
+- The orange Throw icon in the tray also opens the Control Center.
+
+The shortcut may conflict with the C# edition. Close it first, or choose a
+different shortcut in either edition. A second Rust launch opens the existing
+window rather than starting another background instance.
+
+## Control Center
+
+- Lite mode **on by default**: at most 5,000 indexed app shortcuts; Standard:
+  20,000. Only Start menu and Desktop folders are scanned, once at startup or
+  explicitly on request. There is no whole-drive index or background polling.
+- Ink/orange and Paper/orange appearance.
+- 4–12 displayed results; more than eight use the bounded scrollable list.
+- Enable/disable calculator, web search, local launch history, startup hiding,
+  and hide-on-focus-loss.
+- Select Ctrl+Alt+Space, Alt+Space, or Ctrl+Shift+Space. Conflicts are reported.
+- Optional launch at Windows sign-in, under its own **ThrowLauncherRust** entry.
+- Clear history with confirmation. Frequency history is local, bounded to
+  100 apps, and can be disabled (disabling clears it).
+- Measure working set and private committed memory **only when requested**.
+- Optional preference import copies only `HideOnStartup` and
+  `HideWhenDeactivated` from a selected Flow/WPF JSON file after confirmation.
+  The current Rust settings are backed up; the source is unchanged. No code,
+  plugins, paths, proxy settings, or shortcuts are imported; Lite stays on.
+
+Settings and a bounded disk index live in `%APPDATA%\ThrowLauncherRust`.
+For portable use, start `Throw.Rust.exe --portable`; its independent profile
+is `ThrowRustData` next to the executable. Always use the same flag for this
+profile. Neither edition reads/writes Flow's or the C# edition's profile.
+`--background` suppresses the initial window (used by Windows startup).
+
+## What is not ported
+
+This is a working foundation, **not full Flow feature parity**. Existing .NET,
+Python and JavaScript plugins cannot be loaded. Plugin marketplace, Everything
+file search, UWP-only app discovery, arbitrary shell commands, custom themes,
+extension APIs, rich icon previews, multilingual UI, automatic updating and a
+signed installer are not implemented. Shortcuts to packaged applications in the
+Start menu can still work.
+
+The app deliberately does not execute typed shell commands or arbitrary URL
+protocols. Application shortcuts in your own Start menu/Desktop are executable
+content: only install shortcuts you trust. HTTP(S) opens are user-initiated,
+including local/intranet addresses, and are handed to the browser—not fetched
+by the launcher. Web searches send entered terms to DuckDuckGo.
+
+## Memory evidence
+
+Rust and avoiding a web runtime reduce sources of overhead, but **50 MB is
+not guaranteed**. Use Control Center → Measure memory now, then compare with
+Windows Task Manager after the same index has finished loading. Compare both
+editions with equivalent shortcuts and features.
+
+`CI-memory-sample.txt` in the package is a single Windows CI smoke-test sample,
+not an idle benchmark on your PC. Working set and private committed memory are
+different metrics. The smoke test exercises native search/list controls,
+calculator result binding, embedded icon, settings controls and profile writes.
+It does not prove global-hotkey/tray interaction on every Windows desktop.
+
+There are no forced-GC timers, working-set trimming tricks, periodic resource
+monitors, preloaded application icons, plugin runtimes or animated backgrounds.
+Release builds use LTO and size optimization.
+
+## Build and test
+
+Requires Windows x64, stable Rust, and Visual Studio C++ Build Tools with a
+Windows SDK (the normal MSVC Rust requirements).
+
+```powershell
+cd desktop/throw-rust
+cargo test --locked
+cargo build --release --locked
+./target/release/throw-rust.exe
+```
+
+Cross-platform engine tests can also run on Linux/macOS using `cargo test`.
+The Windows workflow compiles the actual UI and runs `--smoke-test` before
+packaging. This flag creates/deletes its own temporary profile; it never changes
+normal settings, startup registration, clipboard, or launches another app.
+
+Architecture: `config` validates/persists settings, `index` scans bounded app
+folders, `search` ranks top-k results and constructs allowlisted actions,
+`calculator` parses arithmetic without evaluation, and `windows` owns native UI
+and OS calls. Win32 calls are kept out of the portable search engine.
+
+## License and origin
+
+MIT. This Rust implementation is newly written for Throw Launcher; it is not a
+compiled conversion of Flow. The repository also retains its C# fork of
+[Flow Launcher](https://github.com/Flow-Launcher/Flow.Launcher) and the original
+Flow/Wox license and credits. The existing Throw logo is reused.
