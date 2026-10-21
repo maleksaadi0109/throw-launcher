@@ -52,7 +52,7 @@ pub fn sql(terms: &str) -> Result<String, String> {
     let literal = terms.replace('\'', "''");
     Ok(format!(
         "SELECT TOP {FILE_CANDIDATES} System.ItemPathDisplay FROM SystemIndex \
-         WHERE System.FileName LIKE '%{literal}%' AND System.ItemType <> 'Directory' \
+         WHERE SCOPE = 'file:' AND System.FileName LIKE '%{literal}%' AND System.ItemType <> 'Directory' \
          ORDER BY System.FileName ASC"
     ))
 }

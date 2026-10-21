@@ -59,7 +59,7 @@ impl Dispatch {
 pub fn search(terms: &str) -> Result<Vec<FileEntry>, String> {
     let sql = files::sql(terms)?;
     unsafe { search_inner(&sql) }.map_err(|error| {
-        format!("File search unavailable ({error}). Enable Windows Search and check Windows Settings → Searching Windows / Indexing Options. Apps still work.")
+        format!("Files unavailable ({error}). Enable Windows Search; check Indexing Options. Apps still work.")
     })
 }
 

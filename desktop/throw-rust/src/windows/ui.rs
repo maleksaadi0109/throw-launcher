@@ -80,6 +80,7 @@ struct App {
     file_entries: Vec<FileEntry>,
     file_error: Option<String>,
     file_pending: bool,
+    shown_query: String,
     reindex_again: bool,
     portable: bool,
     popup: bool,
@@ -228,6 +229,18 @@ impl App {
         let mut text = [0u16; 513];
         let count = GetWindowTextW(self.edit, text.as_mut_ptr(), text.len() as i32);
         let text = String::from_utf16_lossy(&text[..count.max(0) as usize]);
+        // A background completion must not turn a highlighted app into a
+        // different selected item just before the user presses Enter.
+        let keep_selection = text == self.shown_query && !self.rows.is_empty();
+        let selected = SendMessageW(self.list, LB_GETCURSEL, 0, 0);
+        let selected_path = if keep_selection && selected >= 0 {
+            self.rows
+                .get(selected as usize)
+                .map(|row| row.detail.clone())
+        } else {
+            None
+        };
+        self.shown_query = text.clone();
         let terms = files::terms(&text).unwrap_or("").to_string();
         if terms != self.file_query {
             self.file_query = terms;
@@ -259,7 +272,12 @@ impl App {
             );
         }
         if !self.rows.is_empty() {
-            SendMessageW(self.list, LB_SETCURSEL, 0, 0);
+            let selection = if keep_selection {
+                selected_path.and_then(|path| self.rows.iter().position(|row| row.detail == path))
+            } else {
+                Some(0)
+            };
+            SendMessageW(self.list, LB_SETCURSEL, selection.unwrap_or(usize::MAX), 0);
         }
         if let Some(error) = &self.file_error {
             self.set_status(error);
@@ -416,12 +434,7 @@ impl App {
         };
         let result = match row.action {
             Action::File(path) => {
-                let entry = FileEntry { path };
-                if !entry.valid() || !entry.path.is_file() {
-                    Err("This file was moved, deleted, or cannot be accessed. Search again or check its folder permissions.".into())
-                } else {
-                    open(self.hwnd, entry.path.as_os_str())
-                }
+                validate_file(&path).and_then(|_| open(self.hwnd, path.as_os_str()))
             }
             Action::App(i) => {
                 if let Some(entry) = self.entries.get(i) {
@@ -1178,11 +1191,19 @@ pub fn run() -> Result<(), String> {
 unsafe fn run_native() -> Result<(), String> {
     let _shell = ShellApartment::initialize()?;
     let args: Vec<_> = std::env::args().skip(1).collect();
-    if args
-        .iter()
-        .any(|a| !["--portable", "--background", "--smoke-test"].contains(&a.as_str()))
-    {
-        return Err("Supported options: --portable, --background, --smoke-test".into());
+    if args.iter().any(|a| {
+        ![
+            "--portable",
+            "--background",
+            "--smoke-test",
+            "--file-search-benchmark",
+        ]
+        .contains(&a.as_str())
+    }) {
+        return Err(
+            "Supported options: --portable, --background, --smoke-test, --file-search-benchmark"
+                .into(),
+        );
     }
     let benchmark = args.iter().any(|a| a == "--file-search-benchmark");
     let smoke = benchmark || args.iter().any(|a| a == "--smoke-test");
@@ -1286,6 +1307,7 @@ unsafe fn run_native() -> Result<(), String> {
         file_entries: vec![],
         file_error: None,
         file_pending: false,
+        shown_query: String::new(),
         reindex_again: false,
         portable,
         popup: false,
@@ -1329,6 +1351,24 @@ unsafe fn run_native() -> Result<(), String> {
             if app.rows.first().map(|r| r.title.as_str()) != Some("30") ||
                 SendMessageW(app.list, LB_GETCOUNT, 0, 0) != 1 {
                 return Err("Native calculator/search list smoke test failed.".into());
+            }
+            let file = root.join("native-file-smoke.txt");
+            std::fs::write(&file, b"File result binding").map_err(|e| e.to_string())?;
+            validate_file(&file)?;
+            SetWindowTextW(app.edit, wide("file: native-file-smoke").as_ptr());
+            app.file_query = "native-file-smoke".into();
+            app.file_entries = vec![FileEntry { path: file.clone() }];
+            app.refresh();
+            if app.rows.len() != 1
+                || !matches!(&app.rows[0].action, Action::File(path) if path == &file)
+                || SendMessageW(app.list, LB_GETCOUNT, 0, 0) != 1
+                || SendMessageW(app.list, LB_GETCURSEL, 0, 0) != 0
+            {
+                return Err("Native file result/list selection smoke test failed.".into());
+            }
+            std::fs::remove_file(&file).map_err(|e| e.to_string())?;
+            if validate_file(&file).is_ok() {
+                return Err("Deleted file was still allowed to open.".into());
             }
             let report = if benchmark {
                 super::benchmark::run(&root)?
