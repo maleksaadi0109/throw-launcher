@@ -6,6 +6,12 @@ use std::{
 };
 
 pub(super) unsafe fn verify_and_capture(root: &Path) -> Result<(), String> {
+    verify_edit_shortcuts()?;
+    let menu = actions::build_menu();
+    if menu.is_null() || GetMenuItemCount(menu) != 7 {
+        return Err("Result action menu is incomplete.".into());
+    }
+    DestroyMenu(menu);
     let deadline = Instant::now() + Duration::from_secs(8);
     loop {
         let mut msg: MSG = zeroed();
@@ -86,9 +92,72 @@ pub(super) unsafe fn verify_and_capture(root: &Path) -> Result<(), String> {
     if count > 48 {
         return Err("Lite icon cache exceeded its bound.".into());
     }
-    let report = format!("{}\nReal Shell icons loaded for all three smoke-test apps.\n{count} icons cached. Lite maximum 48; Standard maximum 96.\nThis CI sample is not a real-world idle memory benchmark.", memory_report()?);
+    let report = format!("{}\nReal Shell icons loaded for all three smoke-test apps.\nNative Ctrl+A/C/V/X/Z editing verified with focus in search and results.\nSeven app context actions constructed; shortcut target resolution covered by Windows tests. No apps or elevated processes launched.\n{count} icons cached. Lite maximum 48; Standard maximum 96.\nThis CI sample is not a real-world idle memory benchmark.", memory_report()?);
     std::fs::write(root.join("smoke-result.txt"), report).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+unsafe fn verify_edit_shortcuts() -> Result<(), String> {
+    let (edit, list) = APP.with(|cell| {
+        let slot = cell.borrow();
+        let app = slot.as_ref().unwrap();
+        (app.edit, app.list)
+    });
+    let mut keyboard = [0u8; 256];
+    if GetKeyboardState(keyboard.as_mut_ptr()) == 0 {
+        return Err("Cannot read keyboard state in editing test.".into());
+    }
+    let result = (|| {
+        let mut pressed = keyboard;
+        pressed[VK_CONTROL as usize] = 0x80;
+        pressed[VK_MENU as usize] = 0;
+        if SetKeyboardState(pressed.as_ptr()) == 0 {
+            return Err("Cannot set keyboard state in editing test.".into());
+        }
+        let key = |hwnd, value| {
+            SendMessageW(hwnd, WM_KEYDOWN, value, 0);
+        };
+        let value = || {
+            let mut text = [0u16; 513];
+            let length = GetWindowTextW(edit, text.as_mut_ptr(), text.len() as i32);
+            String::from_utf16_lossy(&text[..length.max(0) as usize])
+        };
+        SetWindowTextW(edit, wide("clipboard test").as_ptr());
+        // Also exercise routing from the result list, not just the edit field.
+        SetFocus(list);
+        key(list, b'A' as usize);
+        let mut start = 0u32;
+        let mut end = 0u32;
+        SendMessageW(
+            edit,
+            EM_GETSEL,
+            (&mut start as *mut u32) as usize,
+            (&mut end as *mut u32) as isize,
+        );
+        if start != 0 || end != 14 {
+            return Err("Ctrl+A failed to select the complete query.".into());
+        }
+        key(edit, b'C' as usize);
+        SetWindowTextW(edit, wide("replace this").as_ptr());
+        key(edit, b'A' as usize);
+        key(edit, b'V' as usize);
+        if value() != "clipboard test" {
+            return Err("Ctrl+C / Ctrl+V roundtrip failed.".into());
+        }
+        key(edit, b'A' as usize);
+        key(edit, b'X' as usize);
+        if !value().is_empty() {
+            return Err("Ctrl+X did not cut the selected query.".into());
+        }
+        key(edit, b'Z' as usize);
+        if value() != "clipboard test" {
+            return Err("Ctrl+Z did not restore the cut query.".into());
+        }
+        Ok(())
+    })();
+    SetKeyboardState(keyboard.as_ptr());
+    SetWindowTextW(edit, wide("").as_ptr());
+    result
 }
 
 unsafe fn capture(hwnd: HWND, path: &Path) -> Result<(), String> {

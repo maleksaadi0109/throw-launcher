@@ -13,12 +13,20 @@ Windows may show a warning for this unsigned development executable.
 
 - **Ctrl + Alt + Space** opens/hides the launcher (change it in Settings).
 - Type an application name. Use Up/Down and Enter, or double-click.
+- **Ctrl+A / C / X / V / Z** select all, copy, cut, paste and undo in the search
+  field, including when keyboard focus is on the results.
+- **Alt+1–9** opens the corresponding result.
+- Right-click an app (or focus the results and press **Shift+F10**) for Open,
+  Run as administrator, Run as different user, Open containing folder,
+  Open target folder, Copy path, and Hide launcher. Windows handles permission
+  prompts; some apps do not support alternate-user launch. Store-only links may
+  not expose a filesystem target; an explanation is shown instead.
 - `= (12 + 3) * 2` calculates; Enter copies the answer.
 - `? search terms` opens DuckDuckGo in the default browser.
 - An explicit `https://…` or `http://…` URL opens in the default browser.
 - `>` shows Settings, Rebuild app index, and Quit commands.
 - Escape and the close button hide the launcher. **Tray → Quit** exits it.
-- The orange Throw icon in the tray also opens the Control Center.
+- The simplified Throw icon in the tray also opens the Control Center.
 
 The shortcut may conflict with the C# edition. Close it first, or choose a
 different shortcut in either edition. A second Rust launch opens the existing
@@ -29,13 +37,14 @@ window rather than starting another background instance.
 - Lite mode **on by default**: at most 5,000 indexed app shortcuts; Standard:
   20,000. Only Start menu and Desktop folders are scanned, once at startup or
   explicitly on request. There is no whole-drive index or background polling.
-- Ink/orange and Paper/orange appearance.
+- Charcoal Ink and cool-neutral Paper appearance with a restrained blue accent.
 - Native app icons in search results, loaded by a background Shell worker.
   Only the current result set requests icons; the cache is bounded to 48 in
   Lite mode or 96 in Standard. Evicted icon handles are destroyed, and loading
   failures use the Throw fallback instead of blocking the search box.
-- Roomier result cards, an orange selection marker, a bordered search field,
-  keyboard hints, and a window sized to fit the available Windows work area.
+- A compact search-first window, clear app rows, numbered keyboard hints, and a
+  minimal original Throw logo. The window adapts its height to the result count
+  and fits the available Windows work area. Drag its top edge or footer to move it.
 - 4–12 displayed results; more than eight use the bounded scrollable list.
 - Enable/disable calculator, web search, local launch history, startup hiding,
   and hide-on-focus-loss.

@@ -59,7 +59,7 @@ jobs:
           $out = "../../generated-artifacts/throw-rust"
           New-Item -ItemType Directory -Force "$out/package" | Out-Null
           Copy-Item ./target/release/throw-rust.exe "$out/package/Throw.Rust.exe"
-          Copy-Item ../../branding/throw-launcher.ico "$out/package/Throw-Launcher.ico"
+          Copy-Item branding/throw-rust.ico "$out/package/Throw-Launcher.ico"
           Copy-Item README.md "$out/package/README.md"
           Copy-Item ../../LICENSE "$out/package/LICENSE.txt"
           Copy-Item ./target/release/smoke-result.txt "$out/package/CI-memory-sample.txt"

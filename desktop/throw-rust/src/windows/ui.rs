@@ -1,5 +1,6 @@
 use super::icons::{IconCache, ICONS_READY};
 use super::platform::*;
+mod actions;
 mod snapshot;
 mod visuals;
 use std::{
@@ -95,16 +96,16 @@ impl App {
     }
     fn text_color(&self) -> u32 {
         if self.settings.theme == Theme::Ink {
-            rgb(235, 242, 239)
+            rgb(239, 242, 247)
         } else {
-            rgb(20, 38, 32)
+            rgb(30, 38, 50)
         }
     }
     fn muted(&self) -> u32 {
         if self.settings.theme == Theme::Ink {
-            rgb(155, 176, 165)
+            rgb(150, 161, 175)
         } else {
-            rgb(75, 95, 85)
+            rgb(94, 106, 124)
         }
     }
 
@@ -116,19 +117,19 @@ impl App {
         }
         let ink = self.settings.theme == Theme::Ink;
         self.background = CreateSolidBrush(if ink {
-            rgb(18, 32, 29)
+            rgb(35, 40, 47)
         } else {
-            rgb(242, 246, 243)
+            rgb(244, 246, 249)
         });
         self.field = CreateSolidBrush(if ink {
-            rgb(28, 46, 40)
+            rgb(43, 49, 57)
         } else {
             rgb(255, 255, 255)
         });
         self.selected = CreateSolidBrush(if ink {
-            rgb(52, 71, 55)
+            rgb(57, 67, 77)
         } else {
-            rgb(247, 224, 201)
+            rgb(222, 232, 245)
         });
     }
 
@@ -166,7 +167,7 @@ impl App {
             "",
             SEARCH,
             WS_TABSTOP | ES_AUTOHSCROLL as u32,
-            [70, 101, 580, 30],
+            [32, 34, 580, 30],
         );
         SendMessageW(self.edit, EM_SETLIMITTEXT, 512, 0);
         SendMessageW(self.edit, WM_SETFONT, self.input_font as usize, 1);
@@ -196,7 +197,7 @@ impl App {
         if SetWindowSubclass(self.list, Some(edit_proc), 2, 0) == 0 {
             return Err("Cannot attach result keyboard controls.".into());
         }
-        SendMessageW(self.list, LB_SETITEMHEIGHT, 0, self.px(56) as isize);
+        SendMessageW(self.list, LB_SETITEMHEIGHT, 0, self.px(64) as isize);
         self.control(
             self.hwnd,
             "BUTTON",
@@ -232,26 +233,26 @@ impl App {
         let height = client.bottom;
         MoveWindow(
             self.edit,
-            self.px(68),
-            self.px(103),
+            self.px(32),
+            self.px(34),
             (width - self.px(100)).max(1),
             self.px(29),
             1,
         );
         MoveWindow(
             GetDlgItem(self.hwnd, SETTINGS_BUTTON as i32),
-            width - self.px(124),
-            self.px(26),
+            width - self.px(120),
+            self.px(86),
             self.px(104),
-            self.px(34),
+            self.px(24),
             1,
         );
         MoveWindow(
             self.list,
-            self.px(20),
-            self.px(176),
-            (width - self.px(40)).max(1),
-            (height - self.px(220)).max(self.px(56)),
+            self.px(16),
+            self.px(116),
+            (width - self.px(32)).max(1),
+            (height - self.px(158)).max(self.px(64)),
             1,
         );
         MoveWindow(
@@ -259,7 +260,7 @@ impl App {
             self.px(20),
             height - self.px(30),
             if width >= self.px(520) {
-                width - self.px(290)
+                (width - self.px(420)).max(1)
             } else {
                 width - self.px(40)
             },
@@ -294,6 +295,7 @@ impl App {
         let count = GetWindowTextW(self.edit, text.as_mut_ptr(), text.len() as i32);
         let text = String::from_utf16_lossy(&text[..count.max(0) as usize]);
         self.rows = search::query(&text, &self.entries, &self.settings);
+        self.fit_results();
         self.request_result_icons();
         SendMessageW(self.list, LB_RESETCONTENT, 0, 0);
         for row in &self.rows {
@@ -332,6 +334,43 @@ impl App {
         );
         InvalidateRect(self.list, null(), 0);
         InvalidateRect(self.hwnd, null(), 0);
+    }
+
+    unsafe fn fit_results(&self) {
+        let mut work: RECT = zeroed();
+        if SystemParametersInfoW(SPI_GETWORKAREA, 0, (&mut work as *mut RECT).cast(), 0) == 0 {
+            return;
+        }
+        let mut rect: RECT = zeroed();
+        GetWindowRect(self.hwnd, &mut rect);
+        let rows = self.rows.len().clamp(1, self.settings.max_results.min(8));
+        let mut size = RECT {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: self.px(158 + rows as i32 * 64),
+        };
+        AdjustWindowRectEx(
+            &mut size,
+            WS_POPUP | WS_BORDER | WS_CLIPCHILDREN,
+            0,
+            WS_EX_APPWINDOW,
+        );
+        let height = (size.bottom - size.top).min(work.bottom - work.top - self.px(24));
+        let y = rect
+            .top
+            .clamp(work.top, (work.bottom - height).max(work.top));
+        SetWindowPos(
+            self.hwnd,
+            null_mut(),
+            rect.left,
+            y,
+            rect.right - rect.left,
+            height,
+            SWP_NOZORDER | SWP_NOACTIVATE,
+        );
+        // A resize can re-enter while App is borrowed; lay out explicitly too.
+        self.layout();
     }
 
     unsafe fn show(&self) {
@@ -845,6 +884,20 @@ impl App {
 
     unsafe fn dispatch(&mut self, hwnd: HWND, msg: u32, w: usize, l: isize) -> Option<isize> {
         match msg {
+            WM_NCHITTEST if hwnd == self.hwnd => {
+                let mut point = POINT {
+                    x: l as i16 as i32,
+                    y: (l >> 16) as i16 as i32,
+                };
+                ScreenToClient(hwnd, &mut point);
+                let mut client: RECT = zeroed();
+                GetClientRect(hwnd, &mut client);
+                if point.y < self.px(14) || point.y >= client.bottom - self.px(36) {
+                    Some(HTCAPTION as isize)
+                } else {
+                    None
+                }
+            }
             WM_SIZE if hwnd == self.hwnd => {
                 if !self.edit.is_null() {
                     self.layout();
@@ -1033,6 +1086,42 @@ unsafe extern "system" fn edit_proc(
     subclass: usize,
     _: usize,
 ) -> isize {
+    if msg == WM_CONTEXTMENU && subclass == 2 {
+        actions::context_menu(hwnd, l);
+        return 0;
+    }
+    if msg == WM_KEYDOWN && GetKeyState(VK_CONTROL as i32) < 0 && GetKeyState(VK_MENU as i32) >= 0 {
+        let edit = APP.with(|cell| {
+            cell.try_borrow()
+                .ok()
+                .and_then(|slot| slot.as_ref().map(|app| app.edit))
+        });
+        if edit.is_some_and(|edit| actions::text_shortcut(edit, w)) {
+            return 0;
+        }
+    }
+    // TranslateMessage emits a control character after Ctrl+A/C/X/V/Z. Do not
+    // let the original EDIT process the command twice or insert a control glyph.
+    if msg == WM_CHAR && [1, 3, 22, 24, 26].contains(&w) {
+        return 0;
+    }
+    if msg == WM_SYSKEYDOWN && GetKeyState(VK_MENU as i32) < 0 && (0x31..=0x39).contains(&w) {
+        APP.with(|cell| {
+            if let Ok(mut slot) = cell.try_borrow_mut() {
+                if let Some(app) = slot.as_mut() {
+                    let index = w - 0x31;
+                    if index < app.rows.len() {
+                        SendMessageW(app.list, LB_SETCURSEL, index, 0);
+                        app.activate();
+                    }
+                }
+            }
+        });
+        return 0;
+    }
+    if msg == WM_SYSCHAR && (0x31..=0x39).contains(&w) {
+        return 0;
+    }
     if msg == WM_SETFOCUS || msg == WM_KILLFOCUS {
         InvalidateRect(GetParent(hwnd), null(), 0);
     }
@@ -1238,7 +1327,7 @@ unsafe fn run_native() -> Result<(), String> {
         WS_EX_APPWINDOW,
         wide(MAIN_CLASS).as_ptr(),
         wide("Throw Launcher • Rust").as_ptr(),
-        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_CLIPCHILDREN,
+        WS_POPUP | WS_BORDER | WS_CLIPCHILDREN,
         x,
         y,
         width,
@@ -1252,6 +1341,14 @@ unsafe fn run_native() -> Result<(), String> {
         CloseHandle(mutex);
         return Err("Cannot create the launcher window.".into());
     }
+    // Cosmetic enhancements on Windows 11; earlier Windows keeps a native border.
+    let corners = 2i32; // DWMWCP_ROUND
+    windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute(
+        app.hwnd,
+        33,
+        (&corners as *const i32).cast(),
+        size_of::<i32>() as u32,
+    );
     app.icons = Some(IconCache::new(app.hwnd, app.settings.lite));
     SendMessageW(app.hwnd, WM_SETICON, ICON_BIG as usize, icon as isize);
     SendMessageW(app.hwnd, WM_SETICON, ICON_SMALL as usize, icon as isize);
