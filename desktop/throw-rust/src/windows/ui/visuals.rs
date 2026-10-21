@@ -277,17 +277,19 @@ pub(super) unsafe fn draw_row(app: &App, item: &DRAWITEMSTRUCT) {
         };
         rounded(dc, tile, app.field, p(10), None);
         match row.action {
-            Action::App(_) => DrawIconEx(
-                dc,
-                icon_x + p(4),
-                icon_y + p(4),
-                app.icon,
-                p(24),
-                p(24),
-                0,
-                null_mut(),
-                DI_NORMAL,
-            ),
+            Action::App(_) => {
+                DrawIconEx(
+                    dc,
+                    icon_x + p(4),
+                    icon_y + p(4),
+                    app.icon,
+                    p(24),
+                    p(24),
+                    0,
+                    null_mut(),
+                    DI_NORMAL,
+                );
+            }
             Action::Folder(_) => folder_mark(
                 dc,
                 tile,
