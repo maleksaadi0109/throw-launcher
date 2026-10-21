@@ -13,6 +13,12 @@ Windows may show a warning for this unsigned development executable.
 
 - **Ctrl + Alt + Space** opens/hides the launcher (change it in Settings).
 - Type an application name. Use Up/Down and Enter, or double-click.
+- Search local **folders** by name too. Personal folders and a bounded set of
+  fixed-drive directories are indexed in the background. Type an absolute path
+  such as `D:\Projects\` to browse beyond that index.
+- The launcher always displays **three rows**. Scroll the wheel/scrollbar or use
+  the arrow keys to reach more results; Settings controls the total result limit
+  (25, 50 or 100), not the window height. Existing 4–12-result settings migrate to 50.
 - **Ctrl+A / C / X / V / Z** select all, copy, cut, paste and undo in the search
   field, including when keyboard focus is on the results.
 - **Alt+1–9** opens the corresponding result.
@@ -24,7 +30,7 @@ Windows may show a warning for this unsigned development executable.
 - `= (12 + 3) * 2` calculates; Enter copies the answer.
 - `? search terms` opens DuckDuckGo in the default browser.
 - An explicit `https://…` or `http://…` URL opens in the default browser.
-- `>` shows Settings, Rebuild app index, and Quit commands.
+- `>` shows Settings, Rebuild search index, and Quit commands.
 - Escape hides the launcher. **Tray → Quit** exits it.
 - Click the simplified Throw tray icon to open the launcher; use Settings to
   open the Control Center.
@@ -38,15 +44,22 @@ window rather than starting another background instance.
 - Lite mode **on by default**: at most 5,000 indexed app shortcuts; Standard:
   20,000. Only Start menu and Desktop folders are scanned, once at startup or
   explicitly on request. There is no whole-drive index or background polling.
-- Charcoal Ink and cool-neutral Paper appearance with a restrained blue accent.
+- macOS-inspired Pearl and Graphite appearances with soft neutral surfaces and
+  quiet blue selection. Fresh profiles default to Pearl; saved theme choices remain.
 - Native app icons in search results, loaded by a background Shell worker.
   Only the current result set requests icons; the cache is bounded to 48 in
   Lite mode or 96 in Standard. Evicted icon handles are destroyed, and loading
   failures use the Throw fallback instead of blocking the search box.
-- A compact search-first window, clear app rows, numbered keyboard hints, and a
-  minimal original Throw logo. The window adapts its height to the result count
-  and fits the available Windows work area. Drag its top edge or footer to move it.
-- 4–12 displayed results; more than eight use the bounded scrollable list.
+- A compact, fixed three-row search window, numbered keyboard hints, and a
+  minimal original Throw logo. Drag its top edge or footer to move it.
+- Folder names/paths only: Lite keeps at most 10,000 folder entries, Standard
+  30,000, with additional byte, traversal, depth and time budgets. Personal known
+  folders are prioritized; fixed-drive scanning is shallow. OS/application caches,
+  hidden/system directories and reparse-point recursion are excluded.
+  This is **not an exhaustive whole-disk index**. Direct local path browsing
+  covers other locations on request; automatic network-share discovery is excluded.
+- Folder rows open in Windows Explorer and support Open, containing folder,
+  Copy path and Hide in their right-click menu.
 - Enable/disable calculator, web search, local launch history, startup hiding,
   and hide-on-focus-loss.
 - Select Ctrl+Alt+Space, Alt+Space, or Ctrl+Shift+Space. Conflicts are reported.
@@ -59,7 +72,7 @@ window rather than starting another background instance.
   The current Rust settings are backed up; the source is unchanged. No code,
   plugins, paths, proxy settings, or shortcuts are imported; Lite stays on.
 
-Settings and a bounded disk index live in `%APPDATA%\ThrowLauncherRust`.
+Settings and bounded app/folder caches live in `%APPDATA%\ThrowLauncherRust`.
 For portable use, start `Throw.Rust.exe --portable`; its independent profile
 is `ThrowRustData` next to the executable. Always use the same flag for this
 profile. Neither edition reads/writes Flow's or the C# edition's profile.

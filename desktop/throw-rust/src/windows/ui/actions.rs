@@ -148,18 +148,25 @@ pub(super) unsafe fn context_menu(hwnd: HWND, position: isize) {
         }
         let selected = SendMessageW(hwnd, LB_GETCURSEL, 0, 0);
         let row = app.rows.get(selected as usize)?;
-        let Action::App(index) = row.action else {
-            return None;
+        let (entry, folder) = match &row.action {
+            Action::App(index) => (app.entries.get(*index)?.clone(), false),
+            Action::Folder(path) => (
+                Entry {
+                    name: row.title.clone(),
+                    path: path.clone(),
+                },
+                true,
+            ),
+            _ => return None,
         };
-        let entry = app.entries.get(index)?.clone();
         InvalidateRect(app.list, null(), 0);
         app.popup = true;
-        Some((app.hwnd, entry, point))
+        Some((app.hwnd, entry, folder, point))
     });
-    let Some((owner, entry, point)) = snapshot else {
+    let Some((owner, entry, folder, point)) = snapshot else {
         return;
     };
-    let menu = build_menu();
+    let menu = build_menu_for(folder);
     let failed = menu.is_null();
     let command = if failed {
         0
@@ -189,11 +196,18 @@ pub(super) unsafe fn context_menu(hwnd: HWND, position: isize) {
         return;
     }
     let result = match command {
+        LAUNCH if folder => {
+            if Folder::new(entry.path.clone()).is_some() && entry.path.is_dir() {
+                open(owner, entry.path.as_os_str())
+            } else {
+                Err("This folder is no longer available.".into())
+            }
+        }
         LAUNCH => launch(owner, &entry, "open"),
         ADMIN => launch(owner, &entry, "runas"),
         OTHER_USER => launch(owner, &entry, "runasuser"),
         CONTAINING | TARGET => {
-            if !entry.valid() {
+            if !entry.valid() && !(folder && Folder::new(entry.path.clone()).is_some()) {
                 Err("Invalid app path. Rebuild the index.".into())
             } else {
                 let folder = if command == TARGET {
@@ -219,7 +233,7 @@ pub(super) unsafe fn context_menu(hwnd: HWND, position: isize) {
     };
     match result {
         Ok(()) => {
-            if [LAUNCH, ADMIN, OTHER_USER].contains(&command) {
+            if !folder && [LAUNCH, ADMIN, OTHER_USER].contains(&command) {
                 APP.with(|cell| {
                     if let Some(app) = cell.borrow_mut().as_mut() {
                         app.settings
@@ -241,6 +255,10 @@ pub(super) unsafe fn context_menu(hwnd: HWND, position: isize) {
 }
 
 pub(super) unsafe fn build_menu() -> HMENU {
+    build_menu_for(false)
+}
+
+pub(super) unsafe fn build_menu_for(folder: bool) -> HMENU {
     let menu = CreatePopupMenu();
     if menu.is_null() {
         return menu;
@@ -254,6 +272,9 @@ pub(super) unsafe fn build_menu() -> HMENU {
         (COPY_PATH, "Copy path"),
         (HIDE, "Hide launcher"),
     ] {
+        if folder && [ADMIN, OTHER_USER, TARGET].contains(&id) {
+            continue;
+        }
         if AppendMenuW(menu, MF_STRING, id, wide(title).as_ptr()) == 0 {
             DestroyMenu(menu);
             return null_mut();

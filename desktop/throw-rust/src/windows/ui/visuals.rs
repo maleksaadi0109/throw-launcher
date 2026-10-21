@@ -1,10 +1,8 @@
 //! Quiet, keyboard-first launcher drawing. GDI only: no decoding, blur or per-row assets.
 use super::*;
 
-// COLORREF for a restrained steel-blue accent (#749FC8).
-const ACCENT: u32 = 0x00C89F74;
-const SEARCH_BORDER: u32 = 0x00515C68;
-const KEYCAP_BORDER: u32 = 0x00515C68;
+// COLORREF values: a restrained, slightly desaturated Spotlight blue.
+const ACCENT: u32 = 0x00A77A4B;
 
 unsafe fn text(dc: HDC, value: &str, mut rect: RECT, color: u32, flags: u32) {
     SetTextColor(dc, color);
@@ -39,7 +37,7 @@ unsafe fn rounded(dc: HDC, rect: RECT, brush: HBRUSH, radius: i32, border: Optio
 }
 
 unsafe fn magnifier(dc: HDC, center_x: i32, center_y: i32, size: i32) {
-    let stroke = CreatePen(PS_SOLID, (size / 9).max(1), ACCENT);
+    let stroke = CreatePen(PS_SOLID, (size / 10).max(1), ACCENT);
     let old_pen = SelectObject(dc, stroke);
     let old_brush = SelectObject(dc, GetStockObject(HOLLOW_BRUSH));
     let r = size / 3;
@@ -49,6 +47,47 @@ unsafe fn magnifier(dc: HDC, center_x: i32, center_y: i32, size: i32) {
     SelectObject(dc, old_brush);
     SelectObject(dc, old_pen);
     DeleteObject(stroke);
+}
+
+unsafe fn folder_mark(dc: HDC, tile: RECT, scale: i32, color: u32) {
+    let brush = CreateSolidBrush(color);
+    let old_brush = SelectObject(dc, brush);
+    let old_pen = SelectObject(dc, GetStockObject(NULL_PEN));
+    let x = tile.left + scale * 7 / 32;
+    let y = tile.top + scale * 9 / 32;
+    let tab = RECT {
+        left: x,
+        top: y,
+        right: x + scale * 10 / 32,
+        bottom: y + scale * 4 / 32,
+    };
+    let body = RECT {
+        left: x,
+        top: y + scale * 3 / 32,
+        right: tile.right - scale * 6 / 32,
+        bottom: tile.bottom - scale * 7 / 32,
+    };
+    RoundRect(
+        dc,
+        tab.left,
+        tab.top,
+        tab.right,
+        tab.bottom,
+        scale / 8,
+        scale / 8,
+    );
+    RoundRect(
+        dc,
+        body.left,
+        body.top,
+        body.right,
+        body.bottom,
+        scale / 7,
+        scale / 7,
+    );
+    SelectObject(dc, old_pen);
+    SelectObject(dc, old_brush);
+    DeleteObject(brush);
 }
 
 pub(super) unsafe fn paint(app: &App, hwnd: HWND) {
@@ -61,8 +100,9 @@ pub(super) unsafe fn paint(app: &App, hwnd: HWND) {
 
     if hwnd == app.hwnd {
         let p = |n| app.px(n);
-        // Search is the one prominent surface; the edit control itself is a child
-        // window and sits above this inset panel.
+
+        // The inset panel is the only elevated surface; the edit remains a native
+        // child control aligned to the same generous 16/32px rhythm.
         let search_box = RECT {
             left: p(16),
             top: p(16),
@@ -73,45 +113,56 @@ pub(super) unsafe fn paint(app: &App, hwnd: HWND) {
             dc,
             search_box,
             app.field,
-            p(14),
-            Some(if GetFocus() == app.edit {
-                ACCENT
-            } else {
-                SEARCH_BORDER
-            }),
+            p(15),
+            (GetFocus() == app.edit).then_some(ACCENT),
         );
-        magnifier(dc, client.right - p(41), p(48), p(20));
+        magnifier(dc, client.right - p(41), p(48), p(19));
 
-        SelectObject(dc, app.small_font);
+        SelectObject(dc, app.heading_font);
         text(
             dc,
-            "QUICK LAUNCH",
+            "Applications & folders",
             RECT {
                 left: p(20),
                 top: p(88),
-                right: p(180),
+                right: client.right - p(150),
                 bottom: p(112),
             },
-            app.muted(),
+            app.text_color(),
             DT_LEFT | DT_VCENTER,
-        );
-        text(
-            dc,
-            &format!("{} RESULTS", app.rows.len()),
-            RECT {
-                left: client.right - p(246),
-                top: p(88),
-                right: client.right - p(136),
-                bottom: p(112),
-            },
-            app.muted(),
-            DT_RIGHT | DT_VCENTER,
         );
 
         if client.right >= p(520) {
+            SelectObject(dc, app.small_font);
             text(
                 dc,
-                "UP / DOWN  SELECT     ENTER  OPEN     ESC  HIDE",
+                &format!(
+                    "{} {}",
+                    app.rows.len(),
+                    if app.rows.len() == 1 {
+                        "result"
+                    } else {
+                        "results"
+                    }
+                ),
+                RECT {
+                    left: client.right - p(246),
+                    top: p(88),
+                    right: client.right - p(136),
+                    bottom: p(112),
+                },
+                app.muted(),
+                DT_RIGHT | DT_VCENTER,
+            );
+        }
+
+        // Leave room for the native index/mode status control at the lower left.
+        // At compact widths it disappears rather than colliding with that text.
+        if client.right >= p(600) {
+            SelectObject(dc, app.small_font);
+            text(
+                dc,
+                "↑↓ Navigate    ↵ Open    Esc Hide",
                 RECT {
                     left: client.right - p(390),
                     top: client.bottom - p(30),
@@ -129,9 +180,9 @@ pub(super) unsafe fn paint(app: &App, hwnd: HWND) {
             text(
                 dc,
                 if app.worker.is_some() {
-                    "Finding your applications..."
+                    "Finding apps and folders…"
                 } else {
-                    "No matching results"
+                    "No apps or folders found"
                 },
                 RECT {
                     left: p(30),
@@ -145,7 +196,7 @@ pub(super) unsafe fn paint(app: &App, hwnd: HWND) {
             SelectObject(dc, app.small_font);
             text(
                 dc,
-                "Try an app name, = 12 * 3, ? search terms, or > commands",
+                "Search by name, = calculate, ? search the web, or > commands",
                 RECT {
                     left: p(30),
                     top: center + p(5),
@@ -189,43 +240,30 @@ pub(super) unsafe fn draw_row(app: &App, item: &DRAWITEMSTRUCT) {
         } else {
             app.background
         },
-        p(11),
+        p(12),
         None,
     );
-    if selected {
-        let accent = CreateSolidBrush(ACCENT);
-        rounded(
-            dc,
-            RECT {
-                left: card.left,
-                top: card.top + p(15),
-                right: card.left + p(3),
-                bottom: card.bottom - p(15),
-            },
-            accent,
-            p(3),
-            None,
-        );
-        DeleteObject(accent);
-    }
 
     let icon_x = item.rcItem.left + p(18);
     let icon_y = item.rcItem.top + p(16);
+    let icon_size = p(32);
     let icon = match row.action {
         Action::App(index) => app
             .entries
             .get(index)
             .and_then(|entry| app.icons.as_ref().and_then(|cache| cache.get(&entry.path))),
+        Action::Folder(ref path) => app.icons.as_ref().and_then(|cache| cache.get(path)),
         _ => None,
     };
+
     if let Some(icon) = icon {
         DrawIconEx(
             dc,
             icon_x,
             icon_y,
             icon,
-            p(32),
-            p(32),
+            icon_size,
+            icon_size,
             0,
             null_mut(),
             DI_NORMAL,
@@ -234,12 +272,12 @@ pub(super) unsafe fn draw_row(app: &App, item: &DRAWITEMSTRUCT) {
         let tile = RECT {
             left: icon_x,
             top: icon_y,
-            right: icon_x + p(32),
-            bottom: icon_y + p(32),
+            right: icon_x + icon_size,
+            bottom: icon_y + icon_size,
         };
-        rounded(dc, tile, app.field, p(9), None);
-        if matches!(row.action, Action::App(_)) {
-            DrawIconEx(
+        rounded(dc, tile, app.field, p(10), None);
+        match row.action {
+            Action::App(_) => DrawIconEx(
                 dc,
                 icon_x + p(4),
                 icon_y + p(4),
@@ -249,18 +287,25 @@ pub(super) unsafe fn draw_row(app: &App, item: &DRAWITEMSTRUCT) {
                 0,
                 null_mut(),
                 DI_NORMAL,
-            );
-        } else {
-            let glyph = match row.action {
-                Action::Copy(_) => "=",
-                Action::Url(_) => "↗",
-                Action::Settings => "S",
-                Action::Reindex => "↻",
-                Action::Quit => "×",
-                _ => "•",
-            };
-            SelectObject(dc, app.input_font);
-            text(dc, glyph, tile, ACCENT, DT_CENTER | DT_VCENTER);
+            ),
+            Action::Folder(_) => folder_mark(
+                dc,
+                tile,
+                icon_size,
+                if selected { ACCENT } else { app.muted() },
+            ),
+            _ => {
+                let glyph = match row.action {
+                    Action::Copy(_) => "=",
+                    Action::Url(_) => "↗",
+                    Action::Settings => "S",
+                    Action::Reindex => "↻",
+                    Action::Quit => "×",
+                    _ => "·",
+                };
+                SelectObject(dc, app.input_font);
+                text(dc, glyph, tile, ACCENT, DT_CENTER | DT_VCENTER);
+            }
         }
     }
 
@@ -278,7 +323,7 @@ pub(super) unsafe fn draw_row(app: &App, item: &DRAWITEMSTRUCT) {
             right: hint_right,
             bottom: item.rcItem.top + p(44),
         };
-        rounded(dc, keycap, app.field, p(6), Some(KEYCAP_BORDER));
+        rounded(dc, keycap, app.field, p(7), None);
         SelectObject(dc, app.small_font);
         text(
             dc,
@@ -295,7 +340,7 @@ pub(super) unsafe fn draw_row(app: &App, item: &DRAWITEMSTRUCT) {
         &row.title,
         RECT {
             left: item.rcItem.left + p(64),
-            top: item.rcItem.top + p(8),
+            top: item.rcItem.top + p(7),
             right: hint_left - p(12),
             bottom: item.rcItem.top + p(34),
         },
@@ -338,7 +383,7 @@ pub(super) unsafe fn draw_settings_button(app: &App, item: &DRAWITEMSTRUCT) {
     SelectObject(item.hDC, app.small_font);
     text(
         item.hDC,
-        "SETTINGS",
+        "Settings",
         rect,
         app.text_color(),
         DT_CENTER | DT_VCENTER,
@@ -358,7 +403,7 @@ pub(super) unsafe fn draw_search_hint(app: &App, edit: HWND) {
     SelectObject(dc, app.input_font);
     text(
         dc,
-        "Search apps, = calculate, ? search web",
+        "Search apps or folders, = calculate, ? search web",
         rect,
         app.muted(),
         DT_LEFT | DT_VCENTER,

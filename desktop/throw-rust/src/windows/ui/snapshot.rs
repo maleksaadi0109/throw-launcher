@@ -7,6 +7,7 @@ use std::{
 
 pub(super) unsafe fn verify_and_capture(root: &Path) -> Result<(), String> {
     verify_edit_shortcuts()?;
+    verify_folders_and_scroll(root)?;
     let menu = actions::build_menu();
     if menu.is_null() || GetMenuItemCount(menu) != 7 {
         return Err("Result action menu is incomplete.".into());
@@ -23,6 +24,11 @@ pub(super) unsafe fn verify_and_capture(root: &Path) -> Result<(), String> {
             let slot = cell.borrow();
             let app = slot.as_ref().unwrap();
             app.entries.iter().all(|entry| {
+                app.icons
+                    .as_ref()
+                    .and_then(|icons| icons.get(&entry.path))
+                    .is_some()
+            }) && app.folders.iter().all(|entry| {
                 app.icons
                     .as_ref()
                     .and_then(|icons| icons.get(&entry.path))
@@ -55,6 +61,12 @@ pub(super) unsafe fn verify_and_capture(root: &Path) -> Result<(), String> {
         std::thread::sleep(Duration::from_millis(15));
     }
     let hwnd = MAIN_WINDOW.with(|window| window.get());
+    APP.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        let app = slot.as_mut().unwrap();
+        app.settings.theme = Theme::Ink;
+        app.rebuild_brushes();
+    });
     let output = std::env::current_exe()
         .map_err(|e| e.to_string())?
         .parent()
@@ -92,8 +104,87 @@ pub(super) unsafe fn verify_and_capture(root: &Path) -> Result<(), String> {
     if count > 48 {
         return Err("Lite icon cache exceeded its bound.".into());
     }
-    let report = format!("{}\nReal Shell icons loaded for all three smoke-test apps.\nNative Ctrl+A/C/V/X/Z editing verified with focus in search and results. Alt+1 calculator activation verified.\nSeven app context actions constructed; shortcut target resolution covered by Windows tests. No apps or elevated processes launched.\n{count} icons cached. Lite maximum 48; Standard maximum 96.\nThis CI sample is not a real-world idle memory benchmark.", memory_report()?);
+    let report = format!("{}\nReal Shell icons loaded for apps and folders.\nThree-row viewport, native scrolling, folder/path search and background-selection stability verified.\nNative Ctrl+A/C/V/X/Z editing verified with focus in search and results. Alt+1 calculator activation verified.\nApp and folder menus constructed; shortcut target resolution covered by Windows tests. No apps, folders or elevated processes launched.\n{count} icons cached. Lite maximum 48; Standard maximum 96.\nThis CI sample is not a real-world idle memory benchmark.", memory_report()?);
     std::fs::write(root.join("smoke-result.txt"), report).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+unsafe fn settle() {
+    let mut message: MSG = zeroed();
+    while PeekMessageW(&mut message, null_mut(), 0, 0, PM_REMOVE) != 0 {
+        TranslateMessage(&message);
+        DispatchMessageW(&message);
+    }
+}
+
+unsafe fn verify_folders_and_scroll(root: &Path) -> Result<(), String> {
+    let (edit, list, hwnd) = APP.with(|cell| {
+        let slot = cell.borrow();
+        let app = slot.as_ref().unwrap();
+        (app.edit, app.list, app.hwnd)
+    });
+    SetWindowTextW(edit, wide("Documents").as_ptr());
+    let is_folder = APP.with(|cell| {
+        matches!(cell.borrow().as_ref().unwrap().rows.first().map(|r| &r.action), Some(Action::Folder(path)) if path.is_dir())
+    });
+    if !is_folder {
+        return Err("Folder name did not produce an openable folder result.".into());
+    }
+    SetWindowTextW(edit, wide(root.join("Projects")).as_ptr());
+    if SendMessageW(list, LB_GETCOUNT, 0, 0) < 1 {
+        return Err("Absolute local folder browsing failed.".into());
+    }
+    // A late index update must not silently change what Enter will launch.
+    SetWindowTextW(edit, wide("throw").as_ptr());
+    let path = root.join("Throw");
+    std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+    let before = APP.with(|cell| cell.borrow().as_ref().unwrap().selected_identity());
+    let (sender, receiver) = mpsc::channel();
+    APP.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        let app = slot.as_mut().unwrap();
+        let mut folders = app.folders.clone();
+        folders.push(Folder::new(path).unwrap());
+        sender
+            .send(Ok(IndexResult {
+                apps: Scan {
+                    entries: app.entries.clone(),
+                    unreadable: 0,
+                    truncated: false,
+                },
+                folders: folders::Scan {
+                    entries: folders,
+                    limited: false,
+                    unreadable: 0,
+                },
+            }))
+            .unwrap();
+        app.worker = Some(receiver);
+    });
+    SendMessageW(hwnd, INDEX_READY, 0, 0);
+    let after = APP.with(|cell| cell.borrow().as_ref().unwrap().selected_identity());
+    if before != after {
+        return Err("Background folder search changed the selected action.".into());
+    }
+    SetWindowTextW(edit, wide("").as_ptr());
+    settle();
+    let mut rect: RECT = zeroed();
+    GetClientRect(list, &mut rect);
+    let row_height = SendMessageW(list, LB_GETITEMHEIGHT, 0, 0) as i32;
+    if rect.bottom != row_height * 3 || SendMessageW(list, LB_GETCOUNT, 0, 0) <= 3 {
+        return Err(format!("Expected three visible rows and more scrollable results; height {}, row height {row_height}.", rect.bottom));
+    }
+    SendMessageW(list, WM_VSCROLL, SB_BOTTOM as usize, 0);
+    if SendMessageW(list, LB_GETTOPINDEX, 0, 0) <= 0 {
+        return Err("Native scrolling did not reveal additional results.".into());
+    }
+    SendMessageW(list, WM_VSCROLL, SB_TOP as usize, 0);
+    SendMessageW(list, LB_SETCURSEL, 0, 0);
+    let menu = actions::build_menu_for(true);
+    if menu.is_null() || GetMenuItemCount(menu) != 4 {
+        return Err("Folder context menu is incomplete.".into());
+    }
+    DestroyMenu(menu);
     Ok(())
 }
 

@@ -12,6 +12,7 @@ use std::{
 };
 use throw_launcher::{
     config::{import_preferences, read_bounded, Hotkey, Settings, Theme},
+    folders::{self, Folder},
     index::{self, Entry, Scan, LITE_INDEX_LIMIT, STANDARD_INDEX_LIMIT},
     search::{self, Action, ResultRow},
 };
@@ -56,6 +57,11 @@ thread_local! {
     static MAIN_WINDOW: Cell<HWND> = const { Cell::new(null_mut()) };
 }
 
+struct IndexResult {
+    apps: Scan,
+    folders: folders::Scan,
+}
+
 struct App {
     hwnd: HWND,
     settings_hwnd: HWND,
@@ -77,8 +83,9 @@ struct App {
     settings: Settings,
     root: PathBuf,
     entries: Vec<Entry>,
+    folders: Vec<Folder>,
     rows: Vec<ResultRow>,
-    worker: Option<Receiver<Result<Scan, String>>>,
+    worker: Option<Receiver<Result<IndexResult, String>>>,
     reindex_again: bool,
     portable: bool,
     popup: bool,
@@ -97,16 +104,16 @@ impl App {
     }
     fn text_color(&self) -> u32 {
         if self.settings.theme == Theme::Ink {
-            rgb(239, 242, 247)
+            rgb(239, 241, 247)
         } else {
-            rgb(30, 38, 50)
+            rgb(28, 31, 38)
         }
     }
     fn muted(&self) -> u32 {
         if self.settings.theme == Theme::Ink {
-            rgb(150, 161, 175)
+            rgb(153, 159, 173)
         } else {
-            rgb(94, 106, 124)
+            rgb(115, 121, 133)
         }
     }
 
@@ -118,19 +125,19 @@ impl App {
         }
         let ink = self.settings.theme == Theme::Ink;
         self.background = CreateSolidBrush(if ink {
-            rgb(35, 40, 47)
+            rgb(29, 30, 35)
         } else {
-            rgb(244, 246, 249)
+            rgb(247, 248, 250)
         });
         self.field = CreateSolidBrush(if ink {
-            rgb(43, 49, 57)
+            rgb(38, 39, 46)
         } else {
             rgb(255, 255, 255)
         });
         self.selected = CreateSolidBrush(if ink {
-            rgb(57, 67, 77)
+            rgb(48, 57, 74)
         } else {
-            rgb(222, 232, 245)
+            rgb(230, 237, 249)
         });
     }
 
@@ -287,16 +294,18 @@ impl App {
     }
 
     fn request_result_icons(&mut self) {
+        let top = unsafe { SendMessageW(self.list, LB_GETTOPINDEX, 0, 0).max(0) as usize };
         if let Some(icons) = self.icons.as_mut() {
             icons.set_lite(self.settings.lite);
             icons.drain();
-            icons.request(self.rows.iter().filter_map(|row| {
+            icons.request(self.rows.iter().skip(top).take(6).filter_map(|row| {
                 match row.action {
                     Action::App(i) => self
                         .entries
                         .get(i)
                         .filter(|e| e.valid())
                         .map(|e| e.path.clone()),
+                    Action::Folder(ref path) => Some(path.clone()),
                     _ => None,
                 }
             }));
@@ -314,11 +323,10 @@ impl App {
         let mut text = [0u16; 513];
         let count = GetWindowTextW(self.edit, text.as_mut_ptr(), text.len() as i32);
         let text = String::from_utf16_lossy(&text[..count.max(0) as usize]);
-        self.rows = search::query(&text, &self.entries, &self.settings);
+        self.rows = search::query_all(&text, &self.entries, &self.folders, &self.settings);
         // EN_CHANGE is synchronous inside WM_CUT/PASTE/UNDO. Resize after that
         // native operation finishes, rather than re-entering it mid-mutation.
         PostMessageW(self.hwnd, FIT_RESULTS, 0, 0);
-        self.request_result_icons();
         SendMessageW(self.list, LB_RESETCONTENT, 0, 0);
         for row in &self.rows {
             SendMessageW(
@@ -330,14 +338,17 @@ impl App {
         }
         if !self.rows.is_empty() {
             SendMessageW(self.list, LB_SETCURSEL, 0, 0);
+            SendMessageW(self.list, LB_SETTOPINDEX, 0, 0);
         }
+        self.request_result_icons();
         if self.worker.is_none() {
             self.set_status(&if self.rows.is_empty() && !text.trim().is_empty() {
-                "No matches. Try ? web search, = calculator, or > commands.".into()
+                "No matches. Try a folder name, local path, ? web, or = calculate.".into()
             } else {
                 format!(
-                    "{} apps  /  {} mode",
+                    "{} apps · {} folders · {}",
                     self.entries.len(),
+                    self.folders.len(),
                     if self.settings.lite {
                         "Lite"
                     } else {
@@ -374,7 +385,7 @@ impl App {
         }
         let mut rect: RECT = zeroed();
         GetWindowRect(self.hwnd, &mut rect);
-        let rows = self.rows.len().clamp(1, self.settings.max_results.min(8));
+        let rows = 3;
         let mut size = RECT {
             left: 0,
             top: 0,
@@ -411,6 +422,40 @@ impl App {
         SendMessageW(self.edit, EM_SETSEL, 0, -1);
     }
 
+    fn row_identity(&self, row: &ResultRow) -> String {
+        match &row.action {
+            Action::App(i) => format!(
+                "app:{}",
+                self.entries
+                    .get(*i)
+                    .map(|e| e.path.to_string_lossy())
+                    .unwrap_or_default()
+            ),
+            Action::Folder(path) => format!("folder:{}", path.display()),
+            action => format!("{action:?}"),
+        }
+    }
+
+    unsafe fn selected_identity(&self) -> Option<String> {
+        let selected = SendMessageW(self.list, LB_GETCURSEL, 0, 0);
+        self.rows
+            .get(selected as usize)
+            .map(|row| self.row_identity(row))
+    }
+
+    unsafe fn restore_selection(&mut self, identity: Option<String>) {
+        if let Some(i) = identity.and_then(|identity| {
+            self.rows
+                .iter()
+                .position(|row| self.row_identity(row) == identity)
+        }) {
+            SendMessageW(self.list, LB_SETCURSEL, i, 0);
+            SendMessageW(self.list, LB_SETTOPINDEX, i.saturating_sub(2), 0);
+            self.request_result_icons();
+            InvalidateRect(self.list, null(), 0);
+        }
+    }
+
     unsafe fn reindex(&mut self) {
         if self.worker.is_some() {
             self.reindex_again = true;
@@ -423,19 +468,33 @@ impl App {
                 return;
             }
         };
-        self.set_status("Refreshing app index in the background...");
+        let folder_roots = match folder_roots() {
+            Ok(roots) => roots,
+            Err(error) => {
+                self.set_status(&error);
+                return;
+            }
+        };
+        self.set_status("Finding apps and folders…");
         let (sender, receiver) = mpsc::channel();
         let limit = self.limit();
         let cache = self.root.join("apps.json");
+        let folder_cache = self.root.join("folders.json");
+        let lite = self.settings.lite;
         let hwnd = self.hwnd as usize;
         self.worker = Some(receiver);
         std::thread::spawn(move || {
             let result = std::panic::catch_unwind(|| {
                 let scan = index::scan(&roots, limit);
                 save_index(&cache, &scan.entries)?;
-                Ok::<_, String>(scan)
+                let folder_scan = folders::scan(&folder_roots, lite);
+                folders::save(&folder_cache, &folder_scan.entries)?;
+                Ok::<_, String>(IndexResult {
+                    apps: scan,
+                    folders: folder_scan,
+                })
             })
-            .unwrap_or_else(|_| Err("App indexing failed unexpectedly.".into()));
+            .unwrap_or_else(|_| Err("App/folder indexing failed unexpectedly.".into()));
             let _ = sender.send(result);
             // No timer and no polling. Wake the UI once the bounded scan finishes.
             unsafe {
@@ -450,21 +509,34 @@ impl App {
             .take()
             .and_then(|receiver| receiver.try_recv().ok());
         match result {
-            Some(Ok(mut scan)) => {
+            Some(Ok(mut result)) => {
+                let selected = self.selected_identity();
                 if let Some(icons) = self.icons.as_mut() {
                     icons.clear();
                 }
                 // Settings may have changed while the background scan ran.
-                scan.entries.truncate(self.limit());
-                self.entries = scan.entries;
+                result.apps.entries.truncate(self.limit());
+                result.folders.entries.truncate(if self.settings.lite {
+                    folders::LITE_LIMIT
+                } else {
+                    folders::STANDARD_LIMIT
+                });
+                self.entries = result.apps.entries;
+                self.folders = result.folders.entries;
                 self.refresh();
-                if scan.unreadable > 0 || scan.truncated {
+                self.restore_selection(selected);
+                if result.apps.unreadable > 0
+                    || result.apps.truncated
+                    || result.folders.limited
+                    || result.folders.unreadable > 0
+                {
                     self.set_status(&format!(
-                        "{} apps • {} unreadable folders/items{}",
+                        "{} apps · {} folders · {} skipped{}",
                         self.entries.len(),
-                        scan.unreadable,
-                        if scan.truncated {
-                            " • index limit reached"
+                        self.folders.len(),
+                        result.apps.unreadable + result.folders.unreadable,
+                        if result.apps.truncated || result.folders.limited {
+                            " · bounded scan"
                         } else {
                             ""
                         }
@@ -476,7 +548,7 @@ impl App {
             }
             None => {
                 self.set_status(
-                    "App index worker did not return a result. Try > Rebuild app index.",
+                    "Search index worker did not return a result. Try > Rebuild search index.",
                 );
             }
         }
@@ -495,6 +567,13 @@ impl App {
             return;
         };
         let result = match row.action {
+            Action::Folder(path) => {
+                if Folder::new(path.clone()).is_none() || !path.is_dir() {
+                    Err("This folder is unavailable or no longer exists.".into())
+                } else {
+                    open(self.hwnd, path.as_os_str())
+                }
+            }
             Action::App(i) => {
                 if let Some(entry) = self.entries.get(i) {
                     if !entry.valid() || !entry.path.is_file() {
@@ -598,7 +677,7 @@ impl App {
         for (id, label, checked, y) in [
             (
                 LITE,
-                "Lite mode — index up to 5,000 apps (Standard: 20,000)",
+                "Lite — up to 5,000 apps and 10,000 folders; bounded scans",
                 self.settings.lite,
                 101,
             ),
@@ -656,7 +735,7 @@ impl App {
         for (id, label, x, width) in [
             (HOTKEY, "Shortcut", 24, 220),
             (THEME, "Appearance", 268, 150),
-            (LIMIT, "Results", 442, 150),
+            (LIMIT, "Result limit", 442, 150),
         ] {
             self.control(parent, "STATIC", label, id + 20, 0, [x, 351, width, 24]);
             self.control(
@@ -676,13 +755,19 @@ impl App {
             ),
             (
                 THEME,
-                vec!["Ink + orange", "Paper + orange"],
+                vec!["Graphite", "Pearl"],
                 self.settings.theme as usize,
             ),
             (
                 LIMIT,
-                vec!["4", "6", "8", "10", "12"],
-                (self.settings.max_results - 4) / 2,
+                vec!["25 — scroll", "50 — scroll", "100 — scroll"],
+                if self.settings.max_results <= 25 {
+                    0
+                } else if self.settings.max_results <= 50 {
+                    1
+                } else {
+                    2
+                },
             ),
         ] {
             let control = GetDlgItem(parent, id as i32);
@@ -691,6 +776,15 @@ impl App {
             }
             SendMessageW(control, CB_SETCURSEL, selected, 0);
         }
+        let note = self.control(
+            parent,
+            "STATIC",
+            "Always 3 visible rows — scroll for more results.",
+            393,
+            0,
+            [24, 414, 580, 20],
+        );
+        SendMessageW(note, WM_SETFONT, self.small_font as usize, 1);
         self.control(
             parent,
             "BUTTON",
@@ -778,10 +872,10 @@ impl App {
             _ => return Err("Select an appearance.".into()),
         };
         let selected = SendMessageW(GetDlgItem(parent, LIMIT as i32), CB_GETCURSEL, 0, 0);
-        if !(0..=4).contains(&selected) {
+        if !(0..=2).contains(&selected) {
             return Err("Select a result limit.".into());
         }
-        next.max_results = 4 + selected as usize * 2;
+        next.max_results = [25, 50, 100][selected as usize];
         next.validate()?;
         let old = self.settings.clone();
         let old_startup = startup_enabled()?;
@@ -813,6 +907,11 @@ impl App {
         self.rebuild_brushes();
         // Geometry remains bounded even when more results are requested.
         self.entries.truncate(self.limit());
+        self.folders.truncate(if self.settings.lite {
+            folders::LITE_LIMIT
+        } else {
+            folders::STANDARD_LIMIT
+        });
         self.refresh();
         let lite_changed = old.lite != self.settings.lite;
         DestroyWindow(self.settings_hwnd);
@@ -1201,6 +1300,7 @@ unsafe extern "system" fn edit_proc(
                                 (current - 1).max(0)
                             };
                             SendMessageW(app.list, LB_SETCURSEL, next as usize, 0);
+                            app.request_result_icons();
                             InvalidateRect(app.list, null(), 0);
                         }
                     }
@@ -1215,7 +1315,18 @@ unsafe extern "system" fn edit_proc(
     if msg == WM_NCDESTROY {
         RemoveWindowSubclass(hwnd, Some(edit_proc), subclass);
     }
-    DefSubclassProc(hwnd, msg, w, l)
+    let result = DefSubclassProc(hwnd, msg, w, l);
+    if subclass == 2 && [WM_MOUSEWHEEL, WM_VSCROLL, WM_KEYUP].contains(&msg) {
+        APP.with(|cell| {
+            if let Ok(mut slot) = cell.try_borrow_mut() {
+                if let Some(app) = slot.as_mut() {
+                    app.request_result_icons();
+                    InvalidateRect(app.list, null(), 0);
+                }
+            }
+        });
+    }
+    result
 }
 
 unsafe fn tray(hwnd: HWND, icon: HICON) -> Result<(), String> {
@@ -1358,6 +1469,7 @@ unsafe fn run_native() -> Result<(), String> {
         settings,
         root: root.clone(),
         entries: vec![],
+        folders: vec![],
         rows: vec![],
         worker: None,
         reindex_again: false,
@@ -1442,6 +1554,11 @@ unsafe fn run_native() -> Result<(), String> {
                 Entry { name: "Command Prompt".into(), path: windows.join("System32").join("cmd.exe") },
             ].into_iter().filter(|entry| entry.path.is_file()).take(2).collect();
             app.entries.push(Entry { name: "Throw Launcher".into(), path: std::env::current_exe().map_err(|e| e.to_string())? });
+            for name in ["Documents", "Projects"] {
+                let path = root.join(name);
+                std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+                app.folders.push(Folder::new(path).ok_or("Invalid folder fixture")?);
+            }
             app.settings.hide_on_focus_loss = false;
             SetWindowTextW(app.edit, wide("").as_ptr());
             app.refresh();
@@ -1456,6 +1573,10 @@ unsafe fn run_native() -> Result<(), String> {
         match cache {
             Ok(entries) => app.entries = entries,
             Err(error) => message(app.hwnd, &format!("{error}\nThe app index will be rebuilt."), false),
+        }
+        match folders::load(&app.root.join("folders.json"), app.settings.lite) {
+            Ok(folders) => app.folders = folders,
+            Err(error) => message(app.hwnd, &format!("{error}\nThe folder index will be rebuilt."), false),
         }
         app.refresh();
         app.reindex();

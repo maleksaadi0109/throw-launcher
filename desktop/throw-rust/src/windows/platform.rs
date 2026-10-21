@@ -103,6 +103,58 @@ pub fn load_index(path: &Path, limit: usize) -> Result<Vec<Entry>, String> {
     Ok(entries)
 }
 
+pub fn folder_roots() -> Result<Vec<PathBuf>, String> {
+    use std::os::windows::ffi::OsStringExt;
+    let mut roots = Vec::new();
+    unsafe {
+        for id in [
+            FOLDERID_Profile,
+            FOLDERID_Desktop,
+            FOLDERID_Documents,
+            FOLDERID_Downloads,
+            FOLDERID_Pictures,
+            FOLDERID_Music,
+            FOLDERID_Videos,
+        ] {
+            let mut pointer = null_mut();
+            if SHGetKnownFolderPath(&id, KF_FLAG_DONT_VERIFY as u32, null_mut(), &mut pointer) >= 0
+                && !pointer.is_null()
+            {
+                let mut length = 0;
+                while length < 32768 && *pointer.add(length) != 0 {
+                    length += 1;
+                }
+                if length < 32768 {
+                    let path = PathBuf::from(std::ffi::OsString::from_wide(
+                        std::slice::from_raw_parts(pointer, length),
+                    ));
+                    if throw_launcher::folders::Folder::new(path.clone()).is_some()
+                        && !roots.contains(&path)
+                    {
+                        roots.push(path);
+                    }
+                }
+                CoTaskMemFree(pointer.cast());
+            }
+        }
+        use windows_sys::Win32::Storage::FileSystem::{GetDriveTypeW, GetLogicalDrives};
+        let drives = GetLogicalDrives();
+        for letter in b'A'..=b'Z' {
+            if drives & (1 << (letter - b'A')) != 0 {
+                let path = PathBuf::from(format!("{}:\\", letter as char));
+                if GetDriveTypeW(wide(&path).as_ptr()) == 3 {
+                    roots.push(path);
+                }
+            }
+        }
+    }
+    if roots.is_empty() {
+        Err("Windows did not provide any folder search locations.".into())
+    } else {
+        Ok(roots)
+    }
+}
+
 pub fn save_index(path: &Path, entries: &[Entry]) -> Result<(), String> {
     let bytes = serde_json::to_vec(entries).map_err(|e| e.to_string())?;
     // Use the same bound for reads and writes, including unusually long paths.

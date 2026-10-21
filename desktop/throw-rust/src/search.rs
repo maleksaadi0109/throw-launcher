@@ -1,10 +1,13 @@
+use crate::folders::{self, Folder};
 use crate::{calculator, config::Settings, index::Entry};
+use std::path::PathBuf;
 
 pub const MAX_QUERY: usize = 512;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Action {
     App(usize),
+    Folder(PathBuf),
     Url(String),
     Copy(String),
     Settings,
@@ -20,6 +23,15 @@ pub struct ResultRow {
 }
 
 pub fn query(input: &str, entries: &[Entry], settings: &Settings) -> Vec<ResultRow> {
+    query_all(input, entries, &[], settings)
+}
+
+pub fn query_all(
+    input: &str,
+    entries: &[Entry],
+    folders: &[Folder],
+    settings: &Settings,
+) -> Vec<ResultRow> {
     let input = input.trim();
     if input.len() > MAX_QUERY || input.contains('\0') {
         return vec![];
@@ -34,8 +46,8 @@ pub fn query(input: &str, entries: &[Entry], settings: &Settings) -> Vec<ResultR
                 Action::Settings,
             ),
             (
-                "Rebuild app index",
-                "Refresh Start menu and Desktop shortcuts",
+                "Rebuild search index",
+                "Refresh applications and local folders",
                 Action::Reindex,
             ),
             ("Quit Throw", "Exit the Rust launcher", Action::Quit),
@@ -84,9 +96,19 @@ pub fn query(input: &str, entries: &[Entry], settings: &Settings) -> Vec<ResultR
         });
         return rows;
     }
+    if let Some(found) = folders::browse(input, settings.max_results) {
+        return found
+            .into_iter()
+            .map(|f| ResultRow {
+                title: f.name,
+                detail: format!("Folder · {}", f.path.display()),
+                action: Action::Folder(f.path),
+            })
+            .collect();
+    }
     let needle = input.to_lowercase();
     // Keep only top-k, not a second allocation proportional to the full app index.
-    let mut best: Vec<(i64, usize)> = Vec::with_capacity(settings.max_results + 1);
+    let mut best: Vec<(i64, bool, usize)> = Vec::with_capacity(settings.max_results + 1);
     for (i, entry) in entries.iter().enumerate() {
         let name = entry.name.to_lowercase();
         let Some(mut score) = score(&needle, &name) else {
@@ -98,20 +120,53 @@ pub fn query(input: &str, entries: &[Entry], settings: &Settings) -> Vec<ResultR
             .copied()
             .unwrap_or(0)
             .min(25) as i64;
-        let position = best.partition_point(|&(s, _)| s >= score);
+        let position = best.partition_point(|&(s, _, _)| s >= score);
         if position < settings.max_results {
-            best.insert(position, (score, i));
+            best.insert(position, (score, false, i));
             best.truncate(settings.max_results);
         }
     }
-    for (_, i) in best {
-        rows.push(ResultRow {
-            title: entries[i].name.clone(),
-            detail: entries[i].path.to_string_lossy().into_owned(),
-            action: Action::App(i),
+    if !needle.is_empty() {
+        for (i, folder) in folders.iter().enumerate() {
+            let Some(score) = score(&needle, &folder.name.to_lowercase()) else {
+                continue;
+            };
+            let position = best.partition_point(|&(s, _, _)| s >= score);
+            if position < settings.max_results {
+                best.insert(position, (score, true, i));
+                best.truncate(settings.max_results);
+            }
+        }
+    }
+    for (_, folder, i) in best {
+        rows.push(if folder {
+            folder_row(&folders[i])
+        } else {
+            ResultRow {
+                title: entries[i].name.clone(),
+                detail: entries[i].path.to_string_lossy().into_owned(),
+                action: Action::App(i),
+            }
         });
     }
+    // Mix the known/root folders into the empty-query launch list, rather than
+    // hiding them behind all installed apps. Search still ranks by actual match.
+    if needle.is_empty() {
+        for (i, folder) in folders.iter().take(6).enumerate() {
+            let position = (2 + i * 3).min(rows.len());
+            rows.insert(position, folder_row(folder));
+        }
+        rows.truncate(settings.max_results);
+    }
     rows
+}
+
+fn folder_row(folder: &Folder) -> ResultRow {
+    ResultRow {
+        title: folder.name.clone(),
+        detail: format!("Folder · {}", folder.path.display()),
+        action: Action::Folder(folder.path.clone()),
+    }
 }
 
 fn score(needle: &str, name: &str) -> Option<i64> {
@@ -220,5 +275,29 @@ mod tests {
         let rows = query("", &entries, &s);
         assert_eq!(rows.len(), 4);
         assert_eq!(rows[0].title, "App 88");
+    }
+
+    #[test]
+    fn folders_mix_with_apps_and_rank_by_name_without_limiting_viewport() {
+        let settings = Settings::default();
+        let apps: Vec<_> = (0..80)
+            .map(|i| Entry {
+                name: format!("App {i}"),
+                path: std::env::temp_dir().join(format!("App{i}.exe")),
+            })
+            .collect();
+        let folder = Folder::new(std::env::temp_dir().join("Projects")).unwrap();
+        let folders = [folder];
+        let rows = query_all("", &apps, &folders, &settings);
+        assert_eq!(rows.len(), 50);
+        assert!(matches!(rows[0].action, Action::App(_)));
+        assert!(matches!(rows[2].action, Action::Folder(_)));
+        let matching = query_all("projects", &apps, &folders, &settings);
+        assert_eq!(matching[0].title, "Projects");
+        assert!(matches!(matching[0].action, Action::Folder(_)));
+        assert!(matches!(
+            query_all("= 2+3", &apps, &folders, &settings)[0].action,
+            Action::Copy(_)
+        ));
     }
 }

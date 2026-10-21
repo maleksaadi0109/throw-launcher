@@ -35,8 +35,8 @@ pub enum Hotkey {
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
 pub enum Theme {
-    #[default]
     Ink,
+    #[default]
     Light,
 }
 
@@ -52,7 +52,7 @@ impl Default for Settings {
             remember_history: true,
             hotkey: Hotkey::default(),
             theme: Theme::default(),
-            max_results: 8,
+            max_results: 50,
             history: BTreeMap::new(),
         }
     }
@@ -63,8 +63,8 @@ impl Settings {
         if self.version != 1 {
             return Err("Unsupported settings version.".into());
         }
-        if !(4..=12).contains(&self.max_results) {
-            return Err("Results must be between 4 and 12.".into());
+        if !(4..=100).contains(&self.max_results) {
+            return Err("Search result limit must be between 4 and 100.".into());
         }
         if self.history.len() > MAX_HISTORY
             || self
@@ -82,9 +82,14 @@ impl Settings {
             return Ok(Self::default());
         }
         let bytes = read_bounded(path, MAX_SETTINGS_BYTES).map_err(|e| e.to_string())?;
-        let settings: Self =
+        let mut settings: Self =
             serde_json::from_slice(&bytes).map_err(|e| format!("Invalid settings: {e}"))?;
         settings.validate()?;
+        // Older releases used this as the visible-row count. It now caps the
+        // scrollable search list; the viewport is always three rows.
+        if settings.max_results <= 12 {
+            settings.max_results = 50;
+        }
         Ok(settings)
     }
 
