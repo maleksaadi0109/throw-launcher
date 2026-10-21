@@ -25,6 +25,7 @@ pub(super) enum Target {
     Folder(PathBuf),
     File(PathBuf),
     Web(String),
+    DirectWeb(String),
 }
 
 pub(super) struct Panel {
@@ -201,6 +202,7 @@ pub(super) unsafe fn context_menu(hwnd: HWND, position: isize) {
             Action::Folder(path) => Target::Folder(path.clone()),
             Action::File(path) => Target::File(path.clone()),
             Action::Url(url) => Target::Web(url.clone()),
+            Action::DirectUrl(url) => Target::DirectWeb(url.clone()),
             _ => return,
         };
         let name = row.title.clone();
@@ -301,7 +303,7 @@ impl App {
 /// Validate and prepare a captured target before any shell or clipboard operation.
 unsafe fn action_value(target: &Target, command: usize) -> Result<OsString, String> {
     match target {
-        Target::Web(url) => {
+        Target::Web(url) | Target::DirectWeb(url) => {
             if search::safe_url(url).is_none() {
                 return Err("URL is not allowed.".into());
             }
@@ -359,6 +361,9 @@ pub(super) unsafe fn perform(app: &mut App, command: usize) {
             (Target::App(entry), LAUNCH) => launch(owner, entry, "open"),
             (Target::App(entry), ADMIN) => launch(owner, entry, "runas"),
             (Target::App(entry), OTHER_USER) => launch(owner, entry, "runasuser"),
+            (Target::DirectWeb(url), LAUNCH) => {
+                open_direct_url(owner, url, app.settings.direct_link_browser)
+            }
             (_, COPY_PATH | COPY_URL) => copy_text(owner, &value.to_string_lossy()),
             _ => open(owner, &value),
         })
@@ -490,6 +495,10 @@ mod tests {
                     action_value(&Target::Web(url.into()), command).unwrap(),
                     url
                 );
+                assert_eq!(
+                    action_value(&Target::DirectWeb(url.into()), command).unwrap(),
+                    url
+                );
                 for invalid in [
                     "javascript:alert(1)",
                     "file:///C:/Windows/notepad.exe",
@@ -498,6 +507,7 @@ mod tests {
                     "https://example.com\\bad",
                 ] {
                     assert!(action_value(&Target::Web(invalid.into()), command).is_err());
+                    assert!(action_value(&Target::DirectWeb(invalid.into()), command).is_err());
                 }
             }
         }
@@ -551,7 +561,7 @@ impl Target {
             Self::App(_) => Kind::App,
             Self::Folder(_) => Kind::Folder,
             Self::File(_) => Kind::File,
-            Self::Web(_) => Kind::Web,
+            Self::Web(_) | Self::DirectWeb(_) => Kind::Web,
         }
     }
 }

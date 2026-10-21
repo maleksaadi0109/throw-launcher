@@ -222,7 +222,11 @@ pub(super) unsafe fn paint(app: &App, hwnd: HWND) {
                 .get(selected as usize)
                 .map_or("Open", |row| match &row.action {
                     Action::Copy(_) => "Copy",
-                    Action::App(_) | Action::Folder(_) | Action::File(_) | Action::Url(_) => "Open",
+                    Action::App(_)
+                    | Action::Folder(_)
+                    | Action::File(_)
+                    | Action::Url(_)
+                    | Action::DirectUrl(_) => "Open",
                     _ => "Run",
                 });
             SelectObject(dc, app.small_font);
@@ -380,11 +384,11 @@ pub(super) unsafe fn draw_row(app: &App, item: &DRAWITEMSTRUCT) {
                 icon_size,
                 if selected { ACCENT } else { app.muted() },
             ),
-            Action::Copy(_) | Action::File(_) | Action::Url(_) => {
+            Action::Copy(_) | Action::File(_) | Action::Url(_) | Action::DirectUrl(_) => {
                 let glyph = match row.action {
                     Action::Copy(_) => "=",
                     Action::File(_) => "▤",
-                    Action::Url(_) => "↗",
+                    Action::Url(_) | Action::DirectUrl(_) => "↗",
                     _ => unreachable!(),
                 };
                 SelectObject(dc, app.input_font);

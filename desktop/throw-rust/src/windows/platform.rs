@@ -6,7 +6,7 @@ use std::{
     ptr::{null, null_mut},
 };
 use throw_launcher::{
-    config::{atomic_write, read_bounded},
+    config::{atomic_write, read_bounded, Browser},
     index::{Entry, STANDARD_INDEX_LIMIT},
 };
 use windows_sys::Win32::{
@@ -184,6 +184,85 @@ pub unsafe fn open(hwnd: HWND, target: &OsStr) -> Result<(), String> {
     }
 }
 
+/// Only direct HTTP(S) input uses this preference. Never pass a command line
+/// through ShellExecute or resolve Chrome through the current directory/PATH.
+pub unsafe fn open_direct_url(hwnd: HWND, url: &str, browser: Browser) -> Result<(), String> {
+    let url = throw_launcher::web::safe_url(url).ok_or("URL is not allowed.")?;
+    match browser {
+        Browser::WindowsDefault => open(hwnd, OsStr::new(&url)),
+        Browser::Chrome => {
+            let executable = chrome_path().ok_or(
+                "Google Chrome was not found. Install Chrome or choose Windows default in Settings > General.",
+            )?;
+            std::process::Command::new(executable)
+                .arg(&url)
+                .spawn()
+                .map_err(|e| format!("Could not open Google Chrome: {e}. Choose Windows default in Settings > General to use another browser."))?;
+            Ok(())
+        }
+    }
+}
+
+fn valid_chrome_path(path: &Path) -> bool {
+    path.is_absolute()
+        && path
+            .file_name()
+            .and_then(OsStr::to_str)
+            .is_some_and(|name| name.eq_ignore_ascii_case("chrome.exe"))
+        && path.is_file()
+}
+
+unsafe fn chrome_path() -> Option<PathBuf> {
+    use std::os::windows::ffi::OsStringExt;
+    // App Paths supports registered custom installs as well as per-user installs.
+    for root in [HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE] {
+        for view in [RRF_SUBKEY_WOW6464KEY, RRF_SUBKEY_WOW6432KEY] {
+            let mut buffer = vec![0u16; 32768];
+            let mut bytes = (buffer.len() * 2) as u32;
+            let status = RegGetValueW(
+                root,
+                wide(r"Software\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe").as_ptr(),
+                null(),
+                RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ | view,
+                null_mut(),
+                buffer.as_mut_ptr().cast(),
+                &mut bytes,
+            );
+            if status == ERROR_SUCCESS {
+                let Some(length) = buffer.iter().position(|&c| c == 0) else {
+                    continue;
+                };
+                let mut value = &buffer[..length];
+                // Some registrations surround the executable path with quotes.
+                if value.len() >= 2
+                    && value[0] == b'"' as u16
+                    && value[value.len() - 1] == b'"' as u16
+                {
+                    value = &value[1..value.len() - 1];
+                }
+                let path = PathBuf::from(std::ffi::OsString::from_wide(value));
+                if valid_chrome_path(&path) {
+                    return Some(path);
+                }
+            }
+        }
+    }
+    for variable in [
+        "LOCALAPPDATA",
+        "ProgramW6432",
+        "PROGRAMFILES",
+        "PROGRAMFILES(X86)",
+    ] {
+        if let Some(root) = std::env::var_os(variable) {
+            let path = PathBuf::from(root).join(r"Google\Chrome\Application\chrome.exe");
+            if valid_chrome_path(&path) {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
 pub fn validate_file(path: &Path) -> Result<(), String> {
     let entry = throw_launcher::files::FileEntry { path: path.into() };
     if !entry.valid() || !path.is_file() {
@@ -359,4 +438,40 @@ pub unsafe fn message(hwnd: HWND, text: &str, error: bool) {
                 MB_ICONINFORMATION
             },
     );
+}
+
+#[cfg(test)]
+mod browser_tests {
+    use super::*;
+
+    #[test]
+    fn direct_links_reject_non_urls_before_any_browser_is_started() {
+        for browser in [Browser::WindowsDefault, Browser::Chrome] {
+            for url in [
+                "file:///C:/Windows/notepad.exe",
+                "javascript:alert(1)",
+                "--user-data-dir=C:/unexpected",
+                "https://example.com/\" --bad-flag",
+                "https://example.com/\0bad",
+            ] {
+                assert!(unsafe { open_direct_url(null_mut(), url, browser) }.is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn chrome_candidates_must_be_existing_absolute_chrome_executables() {
+        let root = std::env::temp_dir().join(format!("throw-chrome-path-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let chrome = root.join("CHROME.EXE");
+        let other = root.join("other.exe");
+        std::fs::write(&chrome, b"fixture only; never launched").unwrap();
+        std::fs::write(&other, b"fixture only; never launched").unwrap();
+        assert!(valid_chrome_path(&chrome));
+        assert!(!valid_chrome_path(&other));
+        assert!(!valid_chrome_path(Path::new("chrome.exe")));
+        assert!(!valid_chrome_path(&root.join("missing/chrome.exe")));
+        assert!(!valid_chrome_path(&root));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

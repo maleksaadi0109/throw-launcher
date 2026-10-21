@@ -423,6 +423,7 @@ unsafe fn verify_files_and_web(
                 let app = slot.as_mut().unwrap();
                 app.settings.bookmarks = true;
                 app.settings.web_search = true;
+                app.settings.direct_link_browser = Browser::Chrome;
                 app.bookmarks = vec![bookmark.clone()];
                 app.file_query = files::terms(query).unwrap_or("").into();
                 app.file_pending = false;
@@ -444,7 +445,8 @@ unsafe fn verify_files_and_web(
                         .iter()
                         .position(|r| match &r.action {
                             Action::File(path) => case == "file" && path == &file,
-                            Action::Url(value) => case != "file" && value == url,
+                            Action::Url(value) => case == "bookmark" && value == url,
+                            Action::DirectUrl(value) => case == "web" && value == url,
                             _ => false,
                         })
                 })
@@ -470,7 +472,8 @@ unsafe fn verify_files_and_web(
                     })
                     && match &app.context.as_ref().unwrap().target {
                         actions::Target::File(path) => case == "file" && path == &file,
-                        actions::Target::Web(value) => case != "file" && value == url,
+                        actions::Target::Web(value) => case == "bookmark" && value == url,
+                        actions::Target::DirectWeb(value) => case == "web" && value == url,
                         _ => false,
                     }
             });

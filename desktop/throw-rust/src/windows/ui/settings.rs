@@ -374,6 +374,23 @@ impl App {
             226,
         )?;
         self.settings_note(0, "Closing the launcher hides it. Use the tray icon or your global shortcut to open it again.", 284, 58)?;
+        self.settings_combo(
+            0,
+            DIRECT_BROWSER,
+            "Browser for direct URLs",
+            &["Windows default".into(), "Google Chrome".into()],
+            match self.settings.direct_link_browser {
+                Browser::WindowsDefault => 0,
+                Browser::Chrome => 1,
+            },
+            370,
+        )?;
+        self.settings_note(
+            0,
+            "Only affects HTTP(S) links you type directly.\nWeb searches, bookmarks and file actions are unchanged.",
+            456,
+            52,
+        )?;
 
         self.settings_combo(
             1,
@@ -539,6 +556,11 @@ impl App {
         next.hide_on_focus_loss = checked(HIDE_FOCUS as i32);
         next.calculator = checked(CALCULATOR as i32);
         next.web_search = checked(WEB as i32);
+        next.direct_link_browser = match selection(DIRECT_BROWSER as i32) {
+            0 => Browser::WindowsDefault,
+            1 => Browser::Chrome,
+            _ => return Err("Select a browser for direct URLs in General.".into()),
+        };
         next.remember_history = checked(HISTORY as i32);
         next.hotkey = match selection(HOTKEY as i32) {
             0 => Hotkey::CtrlAltSpace,

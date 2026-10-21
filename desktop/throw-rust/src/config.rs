@@ -18,6 +18,7 @@ pub struct Settings {
     pub hide_on_focus_loss: bool,
     pub calculator: bool,
     pub web_search: bool,
+    pub direct_link_browser: Browser,
     pub bookmarks: bool,
     pub web_providers: Vec<crate::web::Provider>,
     pub remember_history: bool,
@@ -42,6 +43,13 @@ pub enum Theme {
     Light,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
+pub enum Browser {
+    #[default]
+    WindowsDefault,
+    Chrome,
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -51,6 +59,7 @@ impl Default for Settings {
             hide_on_focus_loss: true,
             calculator: true,
             web_search: true,
+            direct_link_browser: Browser::default(),
             bookmarks: false,
             web_providers: crate::web::defaults(),
             remember_history: true,
@@ -257,6 +266,25 @@ pub fn import_preferences(bytes: &[u8], settings: &mut Settings) -> Result<(), S
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn direct_browser_defaults_and_roundtrips_without_affecting_other_preferences() {
+        let old: Settings = serde_json::from_str(r#"{"version":1}"#).unwrap();
+        assert_eq!(old.direct_link_browser, Browser::WindowsDefault);
+        let root = std::env::temp_dir().join(format!("throw-browser-test-{}", std::process::id()));
+        let path = root.join("settings.json");
+        let mut settings = old.clone();
+        for browser in [Browser::Chrome, Browser::WindowsDefault] {
+            settings.direct_link_browser = browser;
+            settings.save(&path).unwrap();
+            assert_eq!(Settings::load(&path).unwrap(), settings);
+            let mut unchanged = settings.clone();
+            unchanged.direct_link_browser = old.direct_link_browser;
+            assert_eq!(unchanged, old);
+        }
+        assert!(serde_json::from_str::<Settings>(r#"{"direct_link_browser":"cmd.exe"}"#).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn lite_defaults_and_validation() {
         let mut s = Settings::default();

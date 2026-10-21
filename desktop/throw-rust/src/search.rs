@@ -15,6 +15,8 @@ pub enum Action {
     Folder(PathBuf),
     File(PathBuf),
     Url(String),
+    /// A URL typed directly, not a web-provider search or bookmark.
+    DirectUrl(String),
     Copy(String),
     Settings,
     Reindex,
@@ -89,8 +91,12 @@ pub fn query_sources(
     if let Some(url) = safe_url(input) {
         rows.push(ResultRow {
             title: url.clone(),
-            detail: "Open in default browser".into(),
-            action: Action::Url(url),
+            detail: match settings.direct_link_browser {
+                crate::config::Browser::WindowsDefault => "Open in Windows default browser",
+                crate::config::Browser::Chrome => "Open in Google Chrome",
+            }
+            .into(),
+            action: Action::DirectUrl(url),
         });
         return rows;
     }
@@ -226,6 +232,59 @@ fn score(needle: &str, name: &str) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn browser_preference_only_changes_direct_links() {
+        let mut settings = Settings {
+            bookmarks: true,
+            ..Settings::default()
+        };
+        let bookmark = crate::bookmarks::Bookmark {
+            title: "Handbook".into(),
+            url: "https://example.com/bookmark".into(),
+            source: "Chrome".into(),
+        };
+        for (browser, detail) in [
+            (
+                crate::config::Browser::WindowsDefault,
+                "Open in Windows default browser",
+            ),
+            (crate::config::Browser::Chrome, "Open in Google Chrome"),
+        ] {
+            settings.direct_link_browser = browser;
+            for url in ["https://example.com/a?q=a&b=%22", "http://example.com/"] {
+                let rows = query(url, &[], &settings);
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0].action, Action::DirectUrl(url.into()));
+                assert_eq!(rows[0].detail, detail);
+            }
+            assert!(matches!(&query("?rust lang", &[], &settings)[0].action,
+                Action::Url(url) if url == "https://www.google.com/search?q=rust%20lang"));
+            assert_eq!(
+                query_sources(
+                    "handbook",
+                    &[],
+                    &[],
+                    std::slice::from_ref(&bookmark),
+                    &settings
+                )[0]
+                .action,
+                Action::Url(bookmark.url.clone())
+            );
+            settings.web_search = false;
+            assert!(matches!(
+                query("https://example.com", &[], &settings)[0].action,
+                Action::DirectUrl(_)
+            ));
+            assert!(query("?rust lang", &[], &settings).is_empty());
+            assert!(query("javascript:alert(1)", &[], &settings).is_empty());
+            assert!(matches!(
+                query("= 2+3", &[], &settings)[0].action,
+                Action::Copy(_)
+            ));
+            settings.web_search = true;
+        }
+    }
+
     #[test]
     fn exact_prefix_and_fuzzy_ranking() {
         let entries: Vec<_> = ["Visual Studio Code", "Code", "Codec", "Chrome"]
