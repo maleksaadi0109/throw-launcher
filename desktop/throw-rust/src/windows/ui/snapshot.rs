@@ -1,5 +1,6 @@
 //! Native Windows visual smoke evidence. Only invoked with --smoke-test.
 use super::*;
+mod settings_smoke;
 use std::{
     path::Path,
     time::{Duration, Instant},
@@ -73,6 +74,7 @@ pub(super) unsafe fn verify_and_capture(root: &Path) -> Result<(), String> {
         .parent()
         .ok_or("Missing executable directory")?
         .to_path_buf();
+    settings_smoke::verify_and_capture(root, &output)?;
     RedrawWindow(
         hwnd,
         null(),
@@ -117,7 +119,7 @@ pub(super) unsafe fn verify_and_capture(root: &Path) -> Result<(), String> {
     if count > 48 {
         return Err("Lite icon cache exceeded its bound.".into());
     }
-    let report = format!("{}\nReal Shell icons loaded for apps and folders.\nThree-row viewport, native scrolling, folder/path search and background-selection stability verified.\nNative Ctrl+A/C/V/X/Z editing verified with focus in search and results. Alt+1 calculator activation verified.\nCommand palette binding, reboot alias and native confirmation cancellation verified. No power/session/delete action was executed; successful system changes require real-device testing.\nApp and folder menus constructed; shortcut target resolution covered by Windows tests. No apps, folders or elevated processes launched.\n{count} icons cached. Lite maximum 48; Standard maximum 96.\nThis CI sample is not a real-world idle memory benchmark.", memory_report()?);
+    let report = format!("{}\nReal Shell icons loaded for apps and folders.\nThree-row viewport, native scrolling, folder/path search and background-selection stability verified.\nNative Ctrl+A/C/V/X/Z editing verified with focus in search and results. Alt+1 calculator activation verified.\nCommand palette binding, reboot alias and native confirmation cancellation verified. No power/session/delete action was executed; successful system changes require real-device testing.\nSettings: six sections, keyboard focus, draft preservation, save/reload, failed-save recovery, theme-command synchronization and 96/144/192 DPI layout verified. Native captures include all six sections in both themes and Appearance at 150%/200%. Real mixed-monitor dragging still needs device verification.\nApp and folder menus constructed; shortcut target resolution covered by Windows tests. No apps, folders or elevated processes launched.\n{count} icons cached. Lite maximum 48; Standard maximum 96.\nThis CI sample is not a real-world idle memory benchmark.", memory_report()?);
     std::fs::write(root.join("smoke-result.txt"), report).map_err(|e| e.to_string())?;
     Ok(())
 }

@@ -9,84 +9,6 @@ use std::{
 };
 use throw_launcher::commands::{SystemCommand, UtilityCommand};
 use windows_sys::Win32::{Foundation::HWND, UI::Shell::SHEmptyRecycleBinW};
-use windows_sys::Win32::{
-    Foundation::{CloseHandle, GetLastError, SetLastError, ERROR_NOT_ALL_ASSIGNED, HANDLE},
-    Security::{
-        AdjustTokenPrivileges, LookupPrivilegeValueW, LUID_AND_ATTRIBUTES, SE_PRIVILEGE_ENABLED,
-        TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES, TOKEN_QUERY,
-    },
-    System::Threading::{GetCurrentProcess, OpenProcessToken},
-};
-
-// PowrProf requires SeShutdownPrivilege to be enabled, not just present.
-// Enable it only around the user-confirmed call and restore its original state.
-struct PowerPrivilege {
-    token: HANDLE,
-    previous: TOKEN_PRIVILEGES,
-}
-impl PowerPrivilege {
-    unsafe fn acquire() -> Result<Self, String> {
-        let mut token = std::ptr::null_mut();
-        if OpenProcessToken(
-            GetCurrentProcess(),
-            TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
-            &mut token,
-        ) == 0
-        {
-            return Err(format!(
-                "Cannot request Windows power permission: {}",
-                std::io::Error::last_os_error()
-            ));
-        }
-        let mut luid = std::mem::zeroed();
-        if LookupPrivilegeValueW(null(), wide("SeShutdownPrivilege").as_ptr(), &mut luid) == 0 {
-            let error = std::io::Error::last_os_error();
-            CloseHandle(token);
-            return Err(format!("Cannot locate Windows power permission: {error}"));
-        }
-        let requested = TOKEN_PRIVILEGES {
-            PrivilegeCount: 1,
-            Privileges: [LUID_AND_ATTRIBUTES {
-                Luid: luid,
-                Attributes: SE_PRIVILEGE_ENABLED,
-            }],
-        };
-        let mut previous = std::mem::zeroed();
-        let mut length = 0;
-        SetLastError(0);
-        let changed = AdjustTokenPrivileges(
-            token,
-            0,
-            &requested,
-            std::mem::size_of::<TOKEN_PRIVILEGES>() as u32,
-            &mut previous,
-            &mut length,
-        );
-        let error = GetLastError();
-        if changed == 0 || error == ERROR_NOT_ALL_ASSIGNED {
-            CloseHandle(token);
-            return Err(format!(
-                "Windows policy does not permit this power action (error {error})."
-            ));
-        }
-        Ok(Self { token, previous })
-    }
-}
-impl Drop for PowerPrivilege {
-    fn drop(&mut self) {
-        unsafe {
-            AdjustTokenPrivileges(
-                self.token,
-                0,
-                &self.previous,
-                0,
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-            );
-            CloseHandle(self.token);
-        }
-    }
-}
 
 #[link(name = "kernel32")]
 extern "system" {
@@ -132,16 +54,8 @@ pub unsafe fn execute(hwnd: HWND, command: SystemCommand, confirmed: bool) -> Re
     }
     let ok = match command {
         SystemCommand::Lock => LockWorkStation() != 0,
-        SystemCommand::Sleep | SystemCommand::Hibernate => {
-            let _permission = PowerPrivilege::acquire()?;
-            if SetSuspendState(u8::from(command == SystemCommand::Hibernate), 0, 0) == 0 {
-                return Err(format!(
-                    "Windows could not suspend this computer: {}",
-                    std::io::Error::last_os_error()
-                ));
-            }
-            true
-        }
+        SystemCommand::Sleep => SetSuspendState(0, 0, 0) != 0,
+        SystemCommand::Hibernate => SetSuspendState(1, 0, 0) != 0,
         SystemCommand::EmptyRecycleBin => {
             let status = SHEmptyRecycleBinW(hwnd, null(), 1);
             if status < 0 {
