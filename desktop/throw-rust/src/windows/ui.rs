@@ -172,12 +172,8 @@ impl App {
         );
         SendMessageW(self.edit, EM_SETLIMITTEXT, 512, 0);
         SendMessageW(self.edit, WM_SETFONT, self.input_font as usize, 1);
-        SendMessageW(
-            self.edit,
-            EM_SETCUEBANNER,
-            1,
-            wide("Search apps, = calculate, ? search web").as_ptr() as isize,
-        );
+        // The hint is painted by the subclass, never stored in EDIT text.
+        // Native focused cue banners can clear undo when a cut empties EDIT.
         // Keyboard navigation belongs to the launcher, not to the edit control.
         if SetWindowSubclass(self.edit, Some(edit_proc), 1, 0) == 0 {
             return Err("Cannot attach search keyboard controls.".into());
@@ -1131,6 +1127,19 @@ unsafe extern "system" fn edit_proc(
     subclass: usize,
     _: usize,
 ) -> isize {
+    if subclass == 1 && msg == WM_PAINT {
+        let result = DefSubclassProc(hwnd, msg, w, l);
+        if GetWindowTextLengthW(hwnd) == 0 {
+            APP.with(|cell| {
+                if let Ok(slot) = cell.try_borrow() {
+                    if let Some(app) = slot.as_ref() {
+                        visuals::draw_search_hint(app, hwnd);
+                    }
+                }
+            });
+        }
+        return result;
+    }
     if msg == WM_CONTEXTMENU && subclass == 2 {
         actions::context_menu(hwnd, l);
         return 0;

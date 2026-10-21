@@ -345,3 +345,24 @@ pub(super) unsafe fn draw_settings_button(app: &App, item: &DRAWITEMSTRUCT) {
     );
     RestoreDC(item.hDC, saved);
 }
+
+pub(super) unsafe fn draw_search_hint(app: &App, edit: HWND) {
+    let dc = GetDC(edit);
+    if dc.is_null() {
+        return;
+    }
+    let saved = SaveDC(dc);
+    let mut rect: RECT = zeroed();
+    GetClientRect(edit, &mut rect);
+    rect.left += app.px(2);
+    SelectObject(dc, app.input_font);
+    text(
+        dc,
+        "Search apps, = calculate, ? search web",
+        rect,
+        app.muted(),
+        DT_LEFT | DT_VCENTER,
+    );
+    RestoreDC(dc, saved);
+    ReleaseDC(edit, dc);
+}

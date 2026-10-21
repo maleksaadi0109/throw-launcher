@@ -25,8 +25,9 @@ Windows may show a warning for this unsigned development executable.
 - `? search terms` opens DuckDuckGo in the default browser.
 - An explicit `https://…` or `http://…` URL opens in the default browser.
 - `>` shows Settings, Rebuild app index, and Quit commands.
-- Escape and the close button hide the launcher. **Tray → Quit** exits it.
-- The simplified Throw icon in the tray also opens the Control Center.
+- Escape hides the launcher. **Tray → Quit** exits it.
+- Click the simplified Throw tray icon to open the launcher; use Settings to
+  open the Control Center.
 
 The shortcut may conflict with the C# edition. Close it first, or choose a
 different shortcut in either edition. A second Rust launch opens the existing
