@@ -50,5 +50,6 @@ Thumbs.db
 .github/instructions/nx.instructions.md
 
 # Replit
+/.replit
 .cache/
 .local/
