@@ -80,7 +80,8 @@ function Find-Wizard {
 }
 function Click([string]$caption) {
     $control = @(Children $script:window | Where-Object {
-        $_.Text -eq $caption -and [InstallerWindow]::IsWindowEnabled($_.Handle)
+        $_.Text.Trim().TrimEnd('>').Trim() -eq $caption.Trim().TrimEnd('>').Trim() -and
+            [InstallerWindow]::IsWindowEnabled($_.Handle)
     }) | Select-Object -First 1
     if (-not $control) { throw "Missing enabled installer control '$caption'. Visible: $((Children $script:window).Text -join ' | ')" }
     [void][InstallerWindow]::SetForegroundWindow($script:window)
