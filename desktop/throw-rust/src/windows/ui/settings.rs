@@ -387,7 +387,7 @@ impl App {
             self.settings.hotkey as usize,
             128,
         )?;
-        self.settings_note(3, "LAUNCHER\nUp / Down    Select result          Enter    Open\nAlt + 1–3     Open visible result    Esc        Hide\nCtrl + A / C / X / V / Z    Native text editing", 218, 100)?;
+        self.settings_note(3, "LAUNCHER\nUp / Down    Select result          Enter    Open\nAlt + 1–9     Open ranked result    Esc        Hide\nCtrl + A / C / X / V / Z    Native text editing", 218, 100)?;
         self.settings_note(3, "SETTINGS\nTab / Shift + Tab    Move between controls\nUp / Down    Switch section when sidebar is focused\nCtrl + 1–6    Jump to section     Ctrl + S    Save\nEsc    Close (asks before discarding changes)", 330, 100)?;
 
         self.settings_check(
@@ -658,6 +658,11 @@ impl App {
     pub(super) unsafe fn paint_control_center(&self) {
         let mut ps = zeroed();
         let dc = BeginPaint(self.settings_hwnd, &mut ps);
+        self.paint_control_center_dc(dc);
+        EndPaint(self.settings_hwnd, &ps);
+    }
+
+    pub(super) unsafe fn paint_control_center_dc(&self, dc: HDC) {
         let mut client = zeroed();
         GetClientRect(self.settings_hwnd, &mut client);
         FillRect(dc, &client, self.background);
@@ -666,7 +671,6 @@ impl App {
             ..client
         };
         FillRect(dc, &sidebar, self.field);
-        EndPaint(self.settings_hwnd, &ps);
     }
 
     pub(super) unsafe fn draw_settings_navigation(&self, item: &DRAWITEMSTRUCT) {

@@ -760,12 +760,16 @@ impl App {
         let Some(path) = picked? else {
             return Ok(());
         };
+        self.import_settings_file(&path)
+    }
+
+    unsafe fn import_settings_file(&mut self, path: &std::path::Path) -> Result<(), String> {
         let bytes = read_bounded(&path, 1024 * 1024).map_err(|e| e.to_string())?;
         let mut next = self.settings.clone();
         import_preferences(&bytes, &mut next)?;
         if MessageBoxW(self.settings_hwnd,
             wide("Copy only hide-on-startup and hide-on-focus-loss preferences?\n\nLite will remain enabled. Your current Rust settings will be backed up. No plugins, commands, hotkeys or paths will be imported. The source file stays untouched.").as_ptr(),
-            wide("Import preferences").as_ptr(), MB_YESNO | MB_ICONQUESTION) != IDYES {
+            wide("Import preferences").as_ptr(), MB_YESNO | MB_DEFBUTTON2 | MB_ICONQUESTION) != IDYES {
             return Ok(());
         }
         let destination = self.root.join("settings.json");
@@ -885,16 +889,12 @@ impl App {
                 }
                 Some(0)
             }
-            WM_DPICHANGED if hwnd == self.settings_hwnd => {
-                self.settings_dpi_changed((w & 0xffff) as u32, &*(l as *const RECT));
+            WM_PRINTCLIENT if hwnd == self.settings_hwnd => {
+                self.paint_control_center_dc(w as HDC);
                 Some(0)
             }
-            WM_GETMINMAXINFO if hwnd == self.settings_hwnd => {
-                let info = &mut *(l as *mut MINMAXINFO);
-                info.ptMinTrackSize = POINT {
-                    x: self.center.px(780),
-                    y: self.center.px(540),
-                };
+            WM_DPICHANGED if hwnd == self.settings_hwnd => {
+                self.settings_dpi_changed((w & 0xffff) as u32, &*(l as *const RECT));
                 Some(0)
             }
             WM_DRAWITEM if w == settings::NAV => {
@@ -1089,6 +1089,14 @@ unsafe fn register_hotkey(hwnd: HWND, hotkey: Hotkey) -> bool {
 }
 
 unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, w: usize, l: isize) -> isize {
+    // Fixed-layout Settings can be larger than a small CI desktop while testing
+    // high DPI. Process this even during synchronous SetWindowPos callbacks,
+    // when App is already borrowed; the default screen-sized cap clips controls.
+    if msg == WM_GETMINMAXINFO && MAIN_WINDOW.with(|window| window.get()) != hwnd {
+        let info = &mut *(l as *mut MINMAXINFO);
+        info.ptMaxTrackSize = POINT { x: 8192, y: 8192 };
+        return 0;
+    }
     // Destruction can be synchronous inside an App callback. It must run even
     // when the callback owns the state borrow, or Quit would leave a hidden process.
     if msg == WM_DESTROY && MAIN_WINDOW.with(|window| window.get()) == hwnd {

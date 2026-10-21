@@ -383,7 +383,18 @@ unsafe fn capture(hwnd: HWND, path: &Path) -> Result<(), String> {
         return Err("Cannot allocate native screenshot.".into());
     }
     let previous = SelectObject(memory, bitmap);
-    let copied = BitBlt(memory, 0, 0, width, height, dc, 0, 0, SRCCOPY);
+    let settings = APP.with(|cell| cell.borrow().as_ref().unwrap().settings_hwnd == hwnd);
+    // Print native Settings children even where a synthetic high-DPI window
+    // extends beyond the CI desktop. Launcher captures still use its screen DC.
+    let copied = if settings {
+        windows_sys::Win32::Storage::Xps::PrintWindow(
+            hwnd,
+            memory,
+            windows_sys::Win32::Storage::Xps::PW_CLIENTONLY | PW_RENDERFULLCONTENT,
+        )
+    } else {
+        BitBlt(memory, 0, 0, width, height, dc, 0, 0, SRCCOPY)
+    };
     SelectObject(memory, previous);
     let mut info: BITMAPINFO = zeroed();
     info.bmiHeader.biSize = size_of::<BITMAPINFOHEADER>() as u32;

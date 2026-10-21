@@ -40,7 +40,7 @@ shell arguments and scripts are not accepted.
 This is the first native core-functionality expansion, **not full Flow parity**.
 Browser bookmarks, configurable web providers, advanced file search/preview,
 drag-and-drop/Dialog Jump, search history, game mode, automatic updates and the
-complete Settings redesign still require further work. Original Flow plugins
+other Flow search capabilities still require further work. Original Flow plugins
 are explicitly deferred; no .NET/Python/Node plugin runtime is loaded.
 
 - **Ctrl + Alt + Space** opens/hides the launcher (change it in Settings).
@@ -125,10 +125,38 @@ content: only install shortcuts you trust. HTTP(S) opens are user-initiated,
 including local/intranet addresses, and are handed to the browser—not fetched
 by the launcher. Web searches send entered terms to DuckDuckGo.
 
+## Native Settings
+
+The Control Center uses a persistent six-section sidebar rather than a single
+long form. It is native Rust/Win32, not a browser surface:
+
+- **General:** Windows sign-in, hidden startup and focus-loss behavior.
+- **Appearance:** Graphite and Pearl themes for both the launcher and Settings.
+- **Search:** calculator, web search and total scrollable result limit.
+- **Shortcuts:** global shortcut selection and a guide to native keyboard use.
+- **Privacy:** local launch frequency, clear history, profile access and safe
+  preference import with a backup.
+- **Resources:** Lite indexing bounds, on-demand measured memory and edition
+  limitations. No plugin marketplace or nonfunctional toggles.
+
+Tab/Shift+Tab moves between visible controls; arrow keys change sections while
+the sidebar is focused. Ctrl+1–6 jumps to a section and Ctrl+S saves. Enter
+activates the focused button or saves by default. Esc/Cancel closes Settings,
+asking before discarding edits. Switching sections keeps the draft intact.
+Save keeps the current section open and reports success; errors keep the draft
+available for correction. A theme command immediately saves Appearance and
+updates an open Settings window without overwriting edits in other sections.
+Import replaces the saved supported preferences only after confirmation; it
+asks before discarding a draft, backs up the Rust settings and leaves its source
+untouched. Folder-selection controls belong to the separate search-folder work.
+
+Settings uses per-monitor DPI awareness with scaled fonts, controls and sidebar
+rows. Its awareness is separate from the existing system-aware launcher.
+
 ## Memory evidence
 
 Rust and avoiding a web runtime reduce sources of overhead, but **50 MB is
-not guaranteed**. Use Control Center → Measure memory now, then compare with
+not guaranteed**. Use Settings → Resources → Measure memory now, then compare with
 Windows Task Manager after the same index has finished loading. Compare both
 editions with equivalent shortcuts and features.
 
@@ -137,7 +165,12 @@ not an idle benchmark on your PC. Working set and private committed memory are
 different metrics. The smoke test exercises native search/list controls,
 calculator result binding, embedded icon, settings controls and profile writes.
 It also verifies real Shell icons reach the result list and captures both
-appearance modes. The screenshots are a separate workflow artifact.
+appearance modes. Settings checks cover all six sections in both themes,
+Tab/Shift+Tab and sidebar arrows, Ctrl+number/Ctrl+S, draft preservation,
+save/reload, write-failure recovery, safe import and command-to-theme
+synchronization. Synthetic 96/144/192-DPI messages verify the per-monitor layout
+handler; these do not replace dragging between real mixed-DPI monitors.
+The screenshots are a separate workflow artifact.
 It does not prove global-hotkey/tray interaction on every Windows desktop.
 
 There are no forced-GC timers, working-set trimming tricks, periodic resource
