@@ -17,7 +17,7 @@ use throw_launcher::{
 use windows_sys::Win32::{
     Foundation::*,
     Graphics::Gdi::*,
-    System::{LibraryLoader::*, Threading::*},
+    System::{LibraryLoader::*, SystemServices::SS_ENDELLIPSIS, Threading::*},
     UI::{Controls::*, Input::KeyboardAndMouse::*, Shell::*, WindowsAndMessaging::*},
 };
 
