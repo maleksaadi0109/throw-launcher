@@ -1,4 +1,4 @@
-//! Inline actions. A captured filesystem target cannot change as indexes update.
+//! Inline actions. Captured targets cannot change as indexes update.
 use super::*;
 use std::{ffi::OsString, os::windows::ffi::OsStringExt, path::Path};
 
@@ -9,38 +9,67 @@ pub(super) const CONTAINING: usize = 4;
 pub(super) const TARGET: usize = 5;
 pub(super) const COPY_PATH: usize = 6;
 pub(super) const HIDE: usize = 7;
+pub(super) const COPY_URL: usize = 8;
+
+#[derive(Clone, Copy)]
+pub(super) enum Kind {
+    App,
+    Folder,
+    File,
+    Web,
+}
+
+#[derive(Clone)]
+pub(super) enum Target {
+    App(Entry),
+    Folder(PathBuf),
+    File(PathBuf),
+    Web(String),
+}
 
 pub(super) struct Panel {
-    pub entry: Entry,
-    folder: bool,
+    pub target: Target,
+    name: String,
     query: String,
     identity: Option<String>,
     top: usize,
     filter: String,
 }
 
-pub(super) fn rows(folder: bool, filter: &str) -> Vec<ResultRow> {
+pub(super) fn rows(kind: Kind, filter: &str) -> Vec<ResultRow> {
     let filter = filter.trim().to_lowercase();
-    [
-        (OTHER_USER, "Run as different user"),
-        (ADMIN, "Run as administrator"),
-        (CONTAINING, "Open containing folder"),
-        (TARGET, "Open target folder"),
-        (HIDE, "Hide launcher"),
-        (COPY_PATH, "Copy path"),
-        (LAUNCH, "Open"),
-    ]
-    .into_iter()
-    .filter(|(id, title)| {
-        !(folder && [ADMIN, OTHER_USER, TARGET].contains(id))
-            && title.to_lowercase().contains(&filter)
-    })
-    .map(|(id, title)| ResultRow {
-        title: title.into(),
-        detail: String::new(),
-        action: Action::Context(id),
-    })
-    .collect()
+    let actions: &[(usize, &str)] = match kind {
+        Kind::App => &[
+            (OTHER_USER, "Run as different user"),
+            (ADMIN, "Run as administrator"),
+            (CONTAINING, "Open containing folder"),
+            (TARGET, "Open target folder"),
+            (HIDE, "Hide launcher"),
+            (COPY_PATH, "Copy path"),
+            (LAUNCH, "Open"),
+        ],
+        Kind::Folder => &[
+            (CONTAINING, "Open containing folder"),
+            (HIDE, "Hide launcher"),
+            (COPY_PATH, "Copy path"),
+            (LAUNCH, "Open"),
+        ],
+        Kind::File => &[
+            (LAUNCH, "Open"),
+            (CONTAINING, "Open containing folder"),
+            (COPY_PATH, "Copy path"),
+        ],
+        Kind::Web => &[(LAUNCH, "Open in browser"), (COPY_URL, "Copy URL")],
+    };
+    actions
+        .iter()
+        .filter(|(_, title)| title.to_lowercase().contains(&filter))
+        .map(|(id, title)| ResultRow {
+            title: (*title).into(),
+            detail: String::new(),
+            action: Action::Context(*id),
+        })
+        .collect()
 }
 
 pub(super) unsafe fn target_folder(path: &Path) -> Result<PathBuf, String> {
@@ -120,7 +149,7 @@ unsafe fn launch(hwnd: HWND, entry: &Entry, verb: &'static str) -> Result<(), St
     }
 }
 
-/// Right click, Shift+F10 and the application/menu key all use the same panel.
+/// Right click, Shift+F10, the menu key and search Ctrl+K use the same panel.
 pub(super) unsafe fn context_menu(hwnd: HWND, position: isize) {
     APP.with(|cell| {
         let Ok(mut slot) = cell.try_borrow_mut() else {
@@ -162,28 +191,25 @@ pub(super) unsafe fn context_menu(hwnd: HWND, position: isize) {
         let Some(row) = app.rows.get(selected as usize) else {
             return;
         };
-        let (entry, folder) = match &row.action {
+        let target = match &row.action {
             Action::App(index) => {
                 let Some(entry) = app.entries.get(*index) else {
                     return;
                 };
-                (entry.clone(), false)
+                Target::App(entry.clone())
             }
-            Action::Folder(path) => (
-                Entry {
-                    name: row.title.clone(),
-                    path: path.clone(),
-                },
-                true,
-            ),
+            Action::Folder(path) => Target::Folder(path.clone()),
+            Action::File(path) => Target::File(path.clone()),
+            Action::Url(url) => Target::Web(url.clone()),
             _ => return,
         };
+        let name = row.title.clone();
         let mut query = [0u16; 513];
         let length =
             GetWindowTextW(app.edit, query.as_mut_ptr(), query.len() as i32).max(0) as usize;
         app.context = Some(Panel {
-            entry,
-            folder,
+            target,
+            name,
             query: String::from_utf16_lossy(&query[..length]),
             identity: app.selected_identity(),
             top: SendMessageW(app.list, LB_GETTOPINDEX, 0, 0).max(0) as usize,
@@ -213,8 +239,8 @@ impl App {
         let filter = String::from_utf16_lossy(&query[..length]);
         let same_filter = filter == panel.filter;
         panel.filter = filter.clone();
-        self.rows = rows(panel.folder, &filter);
-        let name = panel.entry.name.clone();
+        self.rows = rows(panel.target.kind(), &filter);
+        let name = panel.name.clone();
         SendMessageW(self.list, WM_SETREDRAW, 0, 0);
         SendMessageW(self.list, LB_RESETCONTENT, 0, 0);
         for row in &self.rows {
@@ -272,67 +298,88 @@ impl App {
     }
 }
 
+/// Validate and prepare a captured target before any shell or clipboard operation.
+unsafe fn action_value(target: &Target, command: usize) -> Result<OsString, String> {
+    match target {
+        Target::Web(url) => {
+            if search::safe_url(url).is_none() {
+                return Err("URL is not allowed.".into());
+            }
+            Ok(url.into())
+        }
+        Target::File(path) => {
+            validate_file(path)?;
+            if command == CONTAINING {
+                containing_folder(path)
+            } else {
+                Ok(path.as_os_str().into())
+            }
+        }
+        Target::Folder(path) => {
+            if command == LAUNCH && (Folder::new(path.clone()).is_none() || !path.is_dir()) {
+                return Err("This folder is no longer available.".into());
+            }
+            if command == CONTAINING {
+                if Folder::new(path.clone()).is_none() {
+                    return Err("Invalid folder path.".into());
+                }
+                containing_folder(path)
+            } else {
+                Ok(path.as_os_str().into())
+            }
+        }
+        Target::App(entry) => {
+            if [CONTAINING, TARGET].contains(&command) && !entry.valid() {
+                return Err("Invalid app path. Rebuild the index.".into());
+            }
+            match command {
+                CONTAINING => containing_folder(&entry.path),
+                TARGET => target_folder(&entry.path).map(PathBuf::into_os_string),
+                _ => Ok(entry.path.as_os_str().into()),
+            }
+        }
+    }
+}
 pub(super) unsafe fn perform(app: &mut App, command: usize) {
     let Some(panel) = app.context.as_ref() else {
         return;
     };
-    if !rows(panel.folder, "")
+    if !rows(panel.target.kind(), "")
         .iter()
         .any(|r| r.action == Action::Context(command))
     {
         return;
     }
-    let entry = panel.entry.clone();
-    let folder = panel.folder;
+    let target = panel.target.clone();
     let owner = app.hwnd;
-    let result = match command {
-        LAUNCH if folder => {
-            if Folder::new(entry.path.clone()).is_some() && entry.path.is_dir() {
-                open(owner, entry.path.as_os_str())
-            } else {
-                Err("This folder is no longer available.".into())
-            }
-        }
-        LAUNCH => launch(owner, &entry, "open"),
-        ADMIN => launch(owner, &entry, "runas"),
-        OTHER_USER => launch(owner, &entry, "runasuser"),
-        CONTAINING | TARGET => {
-            if !entry.valid() && !(folder && Folder::new(entry.path.clone()).is_some()) {
-                Err("Invalid app path. Rebuild the index.".into())
-            } else {
-                let target = if command == TARGET {
-                    target_folder(&entry.path)
-                } else {
-                    entry
-                        .path
-                        .parent()
-                        .map(Path::to_path_buf)
-                        .ok_or("No containing folder.".into())
-                };
-                target.and_then(|path| {
-                    if path.is_dir() {
-                        open(owner, path.as_os_str())
-                    } else {
-                        Err("The folder is unavailable.".into())
-                    }
-                })
-            }
-        }
-        COPY_PATH => copy_text(owner, &entry.path.to_string_lossy()),
-        HIDE => Ok(()),
-        _ => return,
+    let result = if command == HIDE {
+        Ok(())
+    } else {
+        action_value(&target, command).and_then(|value| match (&target, command) {
+            (Target::App(entry), LAUNCH) => launch(owner, entry, "open"),
+            (Target::App(entry), ADMIN) => launch(owner, entry, "runas"),
+            (Target::App(entry), OTHER_USER) => launch(owner, entry, "runasuser"),
+            (_, COPY_PATH | COPY_URL) => copy_text(owner, &value.to_string_lossy()),
+            _ => open(owner, &value),
+        })
     };
     match result {
         Ok(()) => {
-            if !folder && [LAUNCH, ADMIN, OTHER_USER].contains(&command) {
-                app.settings
-                    .record_launch(entry.path.to_string_lossy().into_owned());
-                if let Err(error) = app.settings.save(&app.root.join("settings.json")) {
-                    app.set_status(&format!("Opened app, but history was not saved: {error}"));
+            if let Target::App(entry) = &target {
+                if [LAUNCH, ADMIN, OTHER_USER].contains(&command) {
+                    app.settings
+                        .record_launch(entry.path.to_string_lossy().into_owned());
+                    if let Err(error) = app.settings.save(&app.root.join("settings.json")) {
+                        app.set_status(&format!("Opened app, but history was not saved: {error}"));
+                    }
                 }
             }
-            if command == COPY_PATH {
-                app.set_status("Path copied. Esc to return to search.");
+            if matches!(command, COPY_PATH | COPY_URL) {
+                app.set_status(if command == COPY_URL {
+                    "URL copied. Esc to return to search."
+                } else {
+                    "Path copied. Esc to return to search."
+                });
             } else {
                 app.close_context();
                 ShowWindow(owner, SW_HIDE);
@@ -370,12 +417,90 @@ mod tests {
     use super::*;
     #[test]
     fn panel_actions_are_filtered_without_changing_ids() {
-        assert_eq!(rows(false, "").len(), 7);
-        assert_eq!(rows(true, "").len(), 4);
-        assert_eq!(rows(false, "copy")[0].action, Action::Context(COPY_PATH));
-        assert!(rows(true, "")
-            .iter()
-            .all(|r| !matches!(r.action, Action::Context(ADMIN | OTHER_USER | TARGET))));
+        assert_eq!(rows(Kind::App, "").len(), 7);
+        assert_eq!(rows(Kind::Folder, "").len(), 4);
+        assert_eq!(
+            rows(Kind::App, "copy")[0].action,
+            Action::Context(COPY_PATH)
+        );
+        for kind in [Kind::Folder, Kind::File, Kind::Web] {
+            assert!(rows(kind, "")
+                .iter()
+                .all(|r| !matches!(r.action, Action::Context(ADMIN | OTHER_USER | TARGET))));
+        }
+        assert_eq!(
+            rows(Kind::File, "")
+                .iter()
+                .map(|r| r.action.clone())
+                .collect::<Vec<_>>(),
+            vec![
+                Action::Context(LAUNCH),
+                Action::Context(CONTAINING),
+                Action::Context(COPY_PATH)
+            ]
+        );
+        assert_eq!(
+            rows(Kind::Web, "")
+                .iter()
+                .map(|r| r.action.clone())
+                .collect::<Vec<_>>(),
+            vec![Action::Context(LAUNCH), Action::Context(COPY_URL)]
+        );
+        assert_eq!(
+            rows(Kind::Web, " URL ")[0].action,
+            Action::Context(COPY_URL)
+        );
+        assert!(rows(Kind::File, "administrator").is_empty());
+        assert!(rows(Kind::Web, "path").is_empty());
+    }
+    #[test]
+    fn file_actions_validate_the_captured_file_without_opening_it() {
+        unsafe {
+            let root = std::env::temp_dir().join(format!("ThrowFilePanel-{}", std::process::id()));
+            std::fs::create_dir_all(&root).unwrap();
+            let path = root.join("ordinary document.txt");
+            std::fs::write(&path, "Never execute this fixture").unwrap();
+            let target = Target::File(path.clone());
+            for command in [LAUNCH, COPY_PATH] {
+                assert_eq!(action_value(&target, command).unwrap(), path.as_os_str());
+            }
+            assert_eq!(action_value(&target, CONTAINING).unwrap(), root.as_os_str());
+            std::fs::remove_file(&path).unwrap();
+            for command in [LAUNCH, CONTAINING, COPY_PATH] {
+                assert!(action_value(&target, command).is_err());
+                assert!(action_value(&Target::File(root.clone()), command).is_err());
+                for invalid in [
+                    "relative.txt",
+                    r"\\server\share\document.txt",
+                    r"\\?\C:\document.txt",
+                    r"C:\document.txt:stream",
+                ] {
+                    assert!(action_value(&Target::File(invalid.into()), command).is_err());
+                }
+            }
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+    #[test]
+    fn web_actions_validate_and_preserve_the_captured_url_without_opening_it() {
+        unsafe {
+            for command in [LAUNCH, COPY_URL] {
+                let url = "https://example.com/search?q=a%26b#section";
+                assert_eq!(
+                    action_value(&Target::Web(url.into()), command).unwrap(),
+                    url
+                );
+                for invalid in [
+                    "javascript:alert(1)",
+                    "file:///C:/Windows/notepad.exe",
+                    "https://user:password@example.com",
+                    "https://example.com/\0bad",
+                    "https://example.com\\bad",
+                ] {
+                    assert!(action_value(&Target::Web(invalid.into()), command).is_err());
+                }
+            }
+        }
     }
     #[test]
     fn shortcut_target_is_read_without_launching_it() {
@@ -408,6 +533,25 @@ mod tests {
             assert!(target_folder(Path::new("relative.exe")).is_err());
             assert!(target_folder(&root.join("missing.lnk")).is_err());
             std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+}
+
+fn containing_folder(path: &Path) -> Result<OsString, String> {
+    let parent = path.parent().ok_or("No containing folder.")?;
+    if !parent.is_dir() {
+        return Err("The folder is unavailable.".into());
+    }
+    Ok(parent.as_os_str().into())
+}
+
+impl Target {
+    fn kind(&self) -> Kind {
+        match self {
+            Self::App(_) => Kind::App,
+            Self::Folder(_) => Kind::Folder,
+            Self::File(_) => Kind::File,
+            Self::Web(_) => Kind::Web,
         }
     }
 }

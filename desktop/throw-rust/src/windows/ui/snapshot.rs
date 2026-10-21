@@ -7,6 +7,55 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// Give each simulated shortcut deterministic modifiers, including left/right
+/// keys (AltGr), and restore the caller's state on both success and failure.
+unsafe fn with_modifiers(
+    control: bool,
+    shift: bool,
+    alt: bool,
+    check: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    let mut saved = [0u8; 256];
+    if GetKeyboardState(saved.as_mut_ptr()) == 0 {
+        return Err("Cannot read keyboard state for shortcut check.".into());
+    }
+    let mut pressed = saved;
+    for key in [
+        VK_CONTROL,
+        VK_LCONTROL,
+        VK_RCONTROL,
+        VK_SHIFT,
+        VK_LSHIFT,
+        VK_RSHIFT,
+        VK_MENU,
+        VK_LMENU,
+        VK_RMENU,
+    ] {
+        pressed[key as usize] &= 1;
+    }
+    for (down, generic, left) in [
+        (control, VK_CONTROL, VK_LCONTROL),
+        (shift, VK_SHIFT, VK_LSHIFT),
+        (alt, VK_MENU, VK_LMENU),
+    ] {
+        if down {
+            pressed[generic as usize] |= 0x80;
+            pressed[left as usize] |= 0x80;
+        }
+    }
+    let result = if SetKeyboardState(pressed.as_ptr()) == 0 {
+        Err("Cannot set keyboard state for shortcut check.".into())
+    } else {
+        check()
+    };
+    if SetKeyboardState(saved.as_ptr()) == 0 {
+        return Err(format!(
+            "Cannot restore keyboard state after shortcut check (check result: {result:?})."
+        ));
+    }
+    result
+}
+
 pub(super) unsafe fn verify_and_capture(root: &Path) -> Result<(), String> {
     APP.with(|cell| {
         let slot = cell.borrow();
@@ -27,7 +76,7 @@ pub(super) unsafe fn verify_and_capture(root: &Path) -> Result<(), String> {
     verify_folders_and_scroll(root)?;
     verify_command_palette()?;
     super::web_smoke::verify(root)?;
-    if actions::rows(false, "").len() != 7 {
+    if actions::rows(actions::Kind::App, "").len() != 7 {
         return Err("Result action menu is incomplete.".into());
     }
     let deadline = Instant::now() + Duration::from_secs(8);
@@ -90,7 +139,7 @@ pub(super) unsafe fn verify_and_capture(root: &Path) -> Result<(), String> {
         .ok_or("Missing executable directory")?
         .to_path_buf();
     settings_smoke::verify_and_capture(root, &output)?;
-    context_smoke::verify(&output)?;
+    context_smoke::verify(root, &output)?;
     RedrawWindow(
         hwnd,
         null(),
@@ -135,8 +184,9 @@ pub(super) unsafe fn verify_and_capture(root: &Path) -> Result<(), String> {
     if count > 48 {
         return Err("Lite icon cache exceeded its bound.".into());
     }
-    let report = format!("{}\nReal Shell icons loaded for apps and folders.\nThree-row viewport, native scrolling, folder/path search and background-selection stability verified.\nNative Ctrl+A/C/V/X/Z editing verified with focus in search and results. Alt+1 calculator activation verified.\nCommand palette binding, reboot alias and native confirmation cancellation verified. No power/session/delete action was executed; successful system changes require real-device testing.\nSettings: six sections, keyboard focus, draft preservation, save/reload, failed-save recovery, theme-command synchronization and 96/144/192 DPI layout verified. Native captures include all six sections in both themes and Appearance at 150%/200%. Real mixed-monitor dragging still needs device verification.\nApp and folder menus constructed; shortcut target resolution covered by Windows tests. No apps, folders or elevated processes launched.\n{count} icons cached. Lite maximum 48; Standard maximum 96.\nThis CI sample is not a real-world idle memory benchmark.", memory_report()?);
-    let report = format!("{report}\nNative bookmark opt-in/disable, fixture discovery, safe URL binding, error reporting and provider create/edit/disable/delete persistence verified. Invalid and failed saves preserved previous settings. No personal browser profiles read or browsers launched.");
+    let report = format!("{}\nReal Shell icons loaded for apps and folders.\nThree-row viewport, native scrolling, folder/path search and background-selection stability verified.\nNative Ctrl+A/C/V/X/Z editing verified with focus in search and results. Alt+1 calculator activation verified.\nCommand palette binding, reboot alias and native confirmation cancellation verified. No power/session/delete action was executed; successful system changes require real-device testing.\nSettings: six sections, keyboard focus, draft preservation, save/reload, failed-save recovery, theme-command synchronization and 96/144/192 DPI layout verified. Native captures include all six sections in both themes and Appearance at 150%/200%. Real mixed-monitor dragging still needs device verification.\nApp and folder panels: Ctrl+K from search, repeated shortcut, Esc query/selection restoration, Back and no-selection handling verified. Context-menu entry and Copy path verified; shortcut target resolution covered by Windows tests. No apps, folders or elevated processes launched.\n{count} icons cached. Lite maximum 48; Standard maximum 96.\nThis CI sample is not a real-world idle memory benchmark.", memory_report()?);
+    let report = format!("{report}\nAction shortcut exclusions: plain K typed normally; Ctrl+Shift+K, Alt+K, Alt+Shift+K, Ctrl+Alt+K (including AltGr keydown routing), and Ctrl+Alt+Shift+K preserved the search without opening panels. Ctrl+K on calculator and in-process Settings rows preserved query, selection, focus and visibility without activation. Modifier state restored after each simulated shortcut.\nNative bookmark opt-in/disable, fixture discovery, safe URL binding, error reporting and provider create/edit/disable/delete persistence verified. Invalid and failed saves preserved previous settings. No personal browser profiles read or browsers launched.");
+    let report = format!("{report}\nFile, bookmark and direct web inline panels: supported actions, empty/case-insensitive filtering, captured-target clipboard contents after file/index worker completion, and Back/Esc search selection restoration verified with isolated fixtures. App-only commands rejected. No shell-open actions executed.");
     std::fs::write(root.join("smoke-result.txt"), report).map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -344,7 +394,7 @@ unsafe fn verify_folders_and_scroll(root: &Path) -> Result<(), String> {
     }
     SendMessageW(list, LB_SETTOPINDEX, 0, 0);
     SendMessageW(list, LB_SETCURSEL, 0, 0);
-    if actions::rows(true, "").len() != 4 {
+    if actions::rows(actions::Kind::Folder, "").len() != 4 {
         return Err("Folder context menu is incomplete.".into());
     }
     Ok(())
@@ -356,19 +406,12 @@ unsafe fn verify_edit_shortcuts() -> Result<(), String> {
         let app = slot.as_ref().unwrap();
         (app.edit, app.list)
     });
-    let mut keyboard = [0u8; 256];
-    if GetKeyboardState(keyboard.as_mut_ptr()) == 0 {
-        return Err("Cannot read keyboard state in editing test.".into());
-    }
     let result = (|| {
-        let mut pressed = keyboard;
-        pressed[VK_CONTROL as usize] = 0x80;
-        pressed[VK_MENU as usize] = 0;
-        if SetKeyboardState(pressed.as_ptr()) == 0 {
-            return Err("Cannot set keyboard state in editing test.".into());
-        }
         let key = |hwnd, value| {
-            SendMessageW(hwnd, WM_KEYDOWN, value, 0);
+            with_modifiers(true, false, false, || {
+                SendMessageW(hwnd, WM_KEYDOWN, value, 0);
+                Ok(())
+            })
         };
         let value = || {
             let mut text = [0u16; 513];
@@ -378,7 +421,7 @@ unsafe fn verify_edit_shortcuts() -> Result<(), String> {
         SetWindowTextW(edit, wide("clipboard test").as_ptr());
         // Also exercise routing from the result list, not just the edit field.
         SetFocus(list);
-        key(list, b'A' as usize);
+        key(list, b'A' as usize)?;
         let mut start = 0u32;
         let mut end = 0u32;
         SendMessageW(
@@ -390,15 +433,15 @@ unsafe fn verify_edit_shortcuts() -> Result<(), String> {
         if start != 0 || end != 14 {
             return Err("Ctrl+A failed to select the complete query.".into());
         }
-        key(edit, b'C' as usize);
+        key(edit, b'C' as usize)?;
         SetWindowTextW(edit, wide("replace this").as_ptr());
-        key(edit, b'A' as usize);
-        key(edit, b'V' as usize);
+        key(edit, b'A' as usize)?;
+        key(edit, b'V' as usize)?;
         if value() != "clipboard test" {
             return Err("Ctrl+C / Ctrl+V roundtrip failed.".into());
         }
-        key(edit, b'A' as usize);
-        key(edit, b'X' as usize);
+        key(edit, b'A' as usize)?;
+        key(edit, b'X' as usize)?;
         if !value().is_empty() {
             return Err("Ctrl+X did not cut the selected query.".into());
         }
@@ -409,7 +452,7 @@ unsafe fn verify_edit_shortcuts() -> Result<(), String> {
             TranslateMessage(&message);
             DispatchMessageW(&message);
         }
-        key(edit, b'Z' as usize);
+        key(edit, b'Z' as usize)?;
         if value() != "clipboard test" {
             return Err(format!(
                 "Ctrl+Z did not restore the cut query (got {:?}, can undo: {}).",
@@ -418,22 +461,19 @@ unsafe fn verify_edit_shortcuts() -> Result<(), String> {
             ));
         }
         SetWindowTextW(edit, wide("= 6 * 7").as_ptr());
-        let mut alt = keyboard;
-        alt[VK_MENU as usize] = 0x80;
-        alt[VK_CONTROL as usize] = 0;
-        SetKeyboardState(alt.as_ptr());
-        SendMessageW(edit, WM_SYSKEYDOWN, b'1' as usize, 0);
-        SendMessageW(edit, WM_SYSCHAR, b'1' as usize, 0);
-        SetKeyboardState(pressed.as_ptr());
+        with_modifiers(false, false, true, || {
+            SendMessageW(edit, WM_SYSKEYDOWN, b'1' as usize, 1isize << 29);
+            SendMessageW(edit, WM_SYSCHAR, b'1' as usize, 1isize << 29);
+            Ok(())
+        })?;
         SetWindowTextW(edit, wide("").as_ptr());
-        key(edit, b'V' as usize);
+        key(edit, b'V' as usize)?;
         if value() != "42" {
             return Err("Alt+1 did not activate the selected calculator result.".into());
         }
         ShowWindow(GetParent(edit), SW_SHOW);
         Ok(())
     })();
-    SetKeyboardState(keyboard.as_ptr());
     SetWindowTextW(edit, wide("").as_ptr());
     result
 }

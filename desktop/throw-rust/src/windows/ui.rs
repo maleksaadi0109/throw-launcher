@@ -1485,6 +1485,18 @@ unsafe extern "system" fn edit_proc(
         return 0;
     }
     if msg == WM_KEYDOWN && GetKeyState(VK_CONTROL as i32) < 0 && GetKeyState(VK_MENU as i32) >= 0 {
+        if subclass == 1 && w == b'K' as usize && GetKeyState(VK_SHIFT as i32) >= 0 {
+            // Release the shared borrow before opening the panel mutably.
+            let list = APP.with(|cell| {
+                cell.try_borrow()
+                    .ok()
+                    .and_then(|slot| slot.as_ref().map(|app| app.list))
+            });
+            if let Some(list) = list {
+                actions::context_menu(list, -1);
+            }
+            return 0;
+        }
         let edit = APP.with(|cell| {
             cell.try_borrow()
                 .ok()
@@ -1494,9 +1506,9 @@ unsafe extern "system" fn edit_proc(
             return 0;
         }
     }
-    // TranslateMessage emits a control character after Ctrl+A/C/X/V/Z. Do not
+    // TranslateMessage emits a control character after Ctrl+A/C/K/X/V/Z. Do not
     // let the original EDIT process the command twice or insert a control glyph.
-    if msg == WM_CHAR && [1, 3, 22, 24, 26].contains(&w) {
+    if msg == WM_CHAR && [1, 3, 11, 22, 24, 26].contains(&w) {
         return 0;
     }
     if msg == WM_SYSKEYDOWN && GetKeyState(VK_MENU as i32) < 0 && (0x31..=0x39).contains(&w) {

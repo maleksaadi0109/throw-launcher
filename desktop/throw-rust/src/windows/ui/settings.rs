@@ -441,7 +441,7 @@ impl App {
             self.settings.hotkey as usize,
             130,
         )?;
-        self.settings_note(3, "LAUNCHER\nUp / Down    Select result          Enter    Open\nAlt + 1–9     Open ranked result    Esc        Hide\nCtrl + A / C / X / V / Z    Native text editing", 218, 116)?;
+        self.settings_note(3, "LAUNCHER\nUp / Down    Select result          Enter    Open\nAlt + 1–9     Open ranked result    Esc        Back / Hide\nCtrl + K    App / folder actions from search\nCtrl + A / C / X / V / Z    Native text editing", 218, 132)?;
         self.settings_note(3, "SETTINGS\nTab / Shift + Tab    Move between controls\nUp / Down    Switch section when sidebar is focused\nCtrl + 1–6    Jump to section     Ctrl + S    Save\nEsc    Close (asks before discarding changes)", 354, 122)?;
 
         self.settings_check(
