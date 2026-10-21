@@ -152,6 +152,7 @@ pub(super) unsafe fn context_menu(hwnd: HWND, position: isize) {
             return None;
         };
         let entry = app.entries.get(index)?.clone();
+        InvalidateRect(app.list, null(), 0);
         app.popup = true;
         Some((app.hwnd, entry, point))
     });

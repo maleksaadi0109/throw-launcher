@@ -101,7 +101,7 @@ pub(super) unsafe fn paint(app: &App, hwnd: HWND) {
             RECT {
                 left: client.right - p(246),
                 top: p(88),
-                right: client.right - p(112),
+                right: client.right - p(136),
                 bottom: p(112),
             },
             app.muted(),

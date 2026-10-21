@@ -174,7 +174,7 @@ impl App {
         SendMessageW(
             self.edit,
             EM_SETCUEBANNER,
-            0,
+            1,
             wide("Search apps, = calculate, ? search web").as_ptr() as isize,
         );
         // Keyboard navigation belongs to the launcher, not to the edit control.
@@ -237,7 +237,7 @@ impl App {
             self.px(34),
             (width - self.px(100)).max(1),
             self.px(29),
-            1,
+            0,
         );
         MoveWindow(
             GetDlgItem(self.hwnd, SETTINGS_BUTTON as i32),
@@ -245,7 +245,7 @@ impl App {
             self.px(86),
             self.px(104),
             self.px(24),
-            1,
+            0,
         );
         MoveWindow(
             self.list,
@@ -253,7 +253,7 @@ impl App {
             self.px(116),
             (width - self.px(32)).max(1),
             (height - self.px(158)).max(self.px(64)),
-            1,
+            0,
         );
         MoveWindow(
             self.status,
@@ -265,7 +265,7 @@ impl App {
                 width - self.px(40)
             },
             self.px(22),
-            1,
+            0,
         );
     }
 
@@ -291,6 +291,9 @@ impl App {
     }
 
     unsafe fn refresh(&mut self) {
+        // Owner-draw callbacks must not paint while App is mutably borrowed.
+        // Batch list/geometry changes, then invalidate for the next message turn.
+        SendMessageW(self.list, WM_SETREDRAW, 0, 0);
         let mut text = [0u16; 513];
         let count = GetWindowTextW(self.edit, text.as_mut_ptr(), text.len() as i32);
         let text = String::from_utf16_lossy(&text[..count.max(0) as usize]);
@@ -332,8 +335,17 @@ impl App {
                 SW_SHOW
             },
         );
+        SendMessageW(self.list, WM_SETREDRAW, 1, 0);
+        if self.rows.is_empty() {
+            ShowWindow(self.list, SW_HIDE);
+        }
         InvalidateRect(self.list, null(), 0);
-        InvalidateRect(self.hwnd, null(), 0);
+        RedrawWindow(
+            self.hwnd,
+            null(),
+            null_mut(),
+            RDW_INVALIDATE | RDW_ALLCHILDREN,
+        );
     }
 
     unsafe fn fit_results(&self) {
@@ -367,7 +379,7 @@ impl App {
             y,
             rect.right - rect.left,
             height,
-            SWP_NOZORDER | SWP_NOACTIVATE,
+            SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW | SWP_NOCOPYBITS,
         );
         // A resize can re-enter while App is borrowed; lay out explicitly too.
         self.layout();
@@ -1147,6 +1159,7 @@ unsafe extern "system" fn edit_proc(
                                 (current - 1).max(0)
                             };
                             SendMessageW(app.list, LB_SETCURSEL, next as usize, 0);
+                            InvalidateRect(app.list, null(), 0);
                         }
                     }
                 }

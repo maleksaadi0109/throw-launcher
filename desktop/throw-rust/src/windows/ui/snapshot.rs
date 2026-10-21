@@ -64,7 +64,7 @@ pub(super) unsafe fn verify_and_capture(root: &Path) -> Result<(), String> {
         hwnd,
         null(),
         null_mut(),
-        RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN,
+        RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN,
     );
     capture(hwnd, &output.join("throw-ink.bmp"))?;
     APP.with(|cell| {
@@ -77,7 +77,7 @@ pub(super) unsafe fn verify_and_capture(root: &Path) -> Result<(), String> {
         hwnd,
         null(),
         null_mut(),
-        RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN,
+        RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN,
     );
     capture(hwnd, &output.join("throw-paper.bmp"))?;
     let count = APP.with(|cell| {
@@ -92,7 +92,7 @@ pub(super) unsafe fn verify_and_capture(root: &Path) -> Result<(), String> {
     if count > 48 {
         return Err("Lite icon cache exceeded its bound.".into());
     }
-    let report = format!("{}\nReal Shell icons loaded for all three smoke-test apps.\nNative Ctrl+A/C/V/X/Z editing verified with focus in search and results.\nSeven app context actions constructed; shortcut target resolution covered by Windows tests. No apps or elevated processes launched.\n{count} icons cached. Lite maximum 48; Standard maximum 96.\nThis CI sample is not a real-world idle memory benchmark.", memory_report()?);
+    let report = format!("{}\nReal Shell icons loaded for all three smoke-test apps.\nNative Ctrl+A/C/V/X/Z editing verified with focus in search and results. Alt+1 calculator activation verified.\nSeven app context actions constructed; shortcut target resolution covered by Windows tests. No apps or elevated processes launched.\n{count} icons cached. Lite maximum 48; Standard maximum 96.\nThis CI sample is not a real-world idle memory benchmark.", memory_report()?);
     std::fs::write(root.join("smoke-result.txt"), report).map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -153,6 +153,20 @@ unsafe fn verify_edit_shortcuts() -> Result<(), String> {
         if value() != "clipboard test" {
             return Err("Ctrl+Z did not restore the cut query.".into());
         }
+        SetWindowTextW(edit, wide("= 6 * 7").as_ptr());
+        let mut alt = keyboard;
+        alt[VK_MENU as usize] = 0x80;
+        alt[VK_CONTROL as usize] = 0;
+        SetKeyboardState(alt.as_ptr());
+        SendMessageW(edit, WM_SYSKEYDOWN, b'1' as usize, 0);
+        SendMessageW(edit, WM_SYSCHAR, b'1' as usize, 0);
+        SetKeyboardState(pressed.as_ptr());
+        SetWindowTextW(edit, wide("").as_ptr());
+        key(edit, b'V' as usize);
+        if value() != "42" {
+            return Err("Alt+1 did not activate the selected calculator result.".into());
+        }
+        ShowWindow(GetParent(edit), SW_SHOW);
         Ok(())
     })();
     SetKeyboardState(keyboard.as_ptr());
