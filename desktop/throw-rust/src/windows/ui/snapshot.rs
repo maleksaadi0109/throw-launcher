@@ -149,9 +149,20 @@ unsafe fn verify_edit_shortcuts() -> Result<(), String> {
         if !value().is_empty() {
             return Err("Ctrl+X did not cut the selected query.".into());
         }
+        // Let deferred geometry settle before undo, as it would between real
+        // keystrokes. Editing must survive a results-height change.
+        let mut message: MSG = zeroed();
+        while PeekMessageW(&mut message, null_mut(), 0, 0, PM_REMOVE) != 0 {
+            TranslateMessage(&message);
+            DispatchMessageW(&message);
+        }
         key(edit, b'Z' as usize);
         if value() != "clipboard test" {
-            return Err("Ctrl+Z did not restore the cut query.".into());
+            return Err(format!(
+                "Ctrl+Z did not restore the cut query (got {:?}, can undo: {}).",
+                value(),
+                SendMessageW(edit, EM_CANUNDO, 0, 0)
+            ));
         }
         SetWindowTextW(edit, wide("= 6 * 7").as_ptr());
         let mut alt = keyboard;

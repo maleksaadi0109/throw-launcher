@@ -27,6 +27,7 @@ const SETTINGS_CLASS: &str = "ThrowRustSettingsWindow";
 const HOTKEY_ID: i32 = 41;
 const TRAY: u32 = WM_APP + 1;
 const INDEX_READY: u32 = WM_APP + 2;
+const FIT_RESULTS: u32 = WM_APP + 4;
 const SEARCH: usize = 101;
 const RESULTS: usize = 102;
 const SETTINGS_BUTTON: usize = 103;
@@ -227,11 +228,31 @@ impl App {
     }
 
     unsafe fn layout(&self) {
+        unsafe fn place(hwnd: HWND, x: i32, y: i32, width: i32, height: i32, _: i32) {
+            let mut old: RECT = zeroed();
+            GetWindowRect(hwnd, &mut old);
+            MapWindowPoints(
+                null_mut(),
+                GetParent(hwnd),
+                (&mut old as *mut RECT).cast(),
+                2,
+            );
+            // Repositioning an EDIT during an edit notification can disrupt its
+            // native undo bookkeeping. Height-only launcher changes need not
+            // touch the search field at all.
+            if old.left != x
+                || old.top != y
+                || old.right - old.left != width
+                || old.bottom - old.top != height
+            {
+                MoveWindow(hwnd, x, y, width, height, 0);
+            }
+        }
         let mut client: RECT = zeroed();
         GetClientRect(self.hwnd, &mut client);
         let width = client.right;
         let height = client.bottom;
-        MoveWindow(
+        place(
             self.edit,
             self.px(32),
             self.px(34),
@@ -239,7 +260,7 @@ impl App {
             self.px(29),
             0,
         );
-        MoveWindow(
+        place(
             GetDlgItem(self.hwnd, SETTINGS_BUTTON as i32),
             width - self.px(120),
             self.px(86),
@@ -247,7 +268,7 @@ impl App {
             self.px(24),
             0,
         );
-        MoveWindow(
+        place(
             self.list,
             self.px(16),
             self.px(116),
@@ -255,7 +276,7 @@ impl App {
             (height - self.px(158)).max(self.px(64)),
             0,
         );
-        MoveWindow(
+        place(
             self.status,
             self.px(20),
             height - self.px(30),
@@ -298,7 +319,9 @@ impl App {
         let count = GetWindowTextW(self.edit, text.as_mut_ptr(), text.len() as i32);
         let text = String::from_utf16_lossy(&text[..count.max(0) as usize]);
         self.rows = search::query(&text, &self.entries, &self.settings);
-        self.fit_results();
+        // EN_CHANGE is synchronous inside WM_CUT/PASTE/UNDO. Resize after that
+        // native operation finishes, rather than re-entering it mid-mutation.
+        PostMessageW(self.hwnd, FIT_RESULTS, 0, 0);
         self.request_result_icons();
         SendMessageW(self.list, LB_RESETCONTENT, 0, 0);
         for row in &self.rows {
@@ -896,6 +919,16 @@ impl App {
 
     unsafe fn dispatch(&mut self, hwnd: HWND, msg: u32, w: usize, l: isize) -> Option<isize> {
         match msg {
+            FIT_RESULTS => {
+                self.fit_results();
+                RedrawWindow(
+                    self.hwnd,
+                    null(),
+                    null_mut(),
+                    RDW_INVALIDATE | RDW_ALLCHILDREN,
+                );
+                Some(0)
+            }
             WM_NCHITTEST if hwnd == self.hwnd => {
                 let mut point = POINT {
                     x: l as i16 as i32,
