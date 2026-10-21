@@ -28,8 +28,13 @@ $installDir = Join-Path $env:LOCALAPPDATA 'Throw Installer CI'
 $profile = Join-Path $env:APPDATA 'ThrowLauncherRust'
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $startupName = 'ThrowLauncherRust'
+function Startup-Value {
+    $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\Microsoft\Windows\CurrentVersion\Run')
+    if ($null -eq $key) { return $null }
+    try { return $key.GetValue($startupName, $null) } finally { $key.Dispose() }
+}
 if (Test-Path $profile) { throw 'Refusing to touch a pre-existing Throw profile.' }
-if (Get-ItemPropertyValue $runKey $startupName -ErrorAction SilentlyContinue) { throw 'Refusing to replace an existing startup entry.' }
+if (Startup-Value) { throw 'Refusing to replace an existing startup entry.' }
 
 function Children([IntPtr]$window) {
     $items = [Collections.Generic.List[object]]::new()
@@ -142,19 +147,19 @@ try {
     }
     $installedExe = Join-Path $installDir 'Throw.Rust.exe'
     $expectedStartup = '"' + $installedExe + '" --background'
-    if ((Get-ItemPropertyValue $runKey $startupName) -ne $expectedStartup) { throw 'Startup choice did not register the installed executable.' }
+    if ((Startup-Value) -ne $expectedStartup) { throw 'Startup choice did not register the installed executable.' }
     if (-not (Test-Path "$([Environment]::GetFolderPath('Programs'))/Throw Launcher.lnk")) { throw 'Start menu shortcut missing.' }
     if (-not (Test-Path "$([Environment]::GetFolderPath('Desktop'))/Throw Launcher.lnk")) { throw 'Desktop shortcut missing.' }
     $before = [IO.File]::ReadAllBytes($settingsPath)
     # Upgrade preserves exact preferences while an explicit task choice disables startup.
     Run-And-Wait $setup @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=`"$installDir`"",'/TASKS=!startup,!desktopicon',"/LOG=`"$output/upgrade.log`"")
     if ([Convert]::ToBase64String([IO.File]::ReadAllBytes($settingsPath)) -ne [Convert]::ToBase64String($before)) { throw 'Upgrade overwrote existing preferences.' }
-    if (Get-ItemPropertyValue $runKey $startupName -ErrorAction SilentlyContinue) { throw 'Startup was not disabled.' }
+    if (Startup-Value) { throw 'Startup was not disabled.' }
     # Enabling startup later from Settings must also be cleaned by uninstallation.
     Set-ItemProperty $runKey $startupName $expectedStartup
     Run-And-Wait (Join-Path $installDir 'unins000.exe') @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART')
     if (Test-Path $installedExe) { throw 'Uninstaller left the installed binary.' }
-    if (Get-ItemPropertyValue $runKey $startupName -ErrorAction SilentlyContinue) { throw 'Uninstaller left the installed startup entry.' }
+    if (Startup-Value) { throw 'Uninstaller left the installed startup entry.' }
     if (Test-Path "$([Environment]::GetFolderPath('Programs'))/Throw Launcher.lnk") { throw 'Uninstaller left the Start menu shortcut.' }
     if ([Convert]::ToBase64String([IO.File]::ReadAllBytes($settingsPath)) -ne [Convert]::ToBase64String($before)) { throw 'Uninstaller removed or changed personal preferences.' }
     'PASS: visible wizard, chosen theme/shortcut/privacy, startup, shortcuts, upgrade preservation, uninstall and retained profile.' |
