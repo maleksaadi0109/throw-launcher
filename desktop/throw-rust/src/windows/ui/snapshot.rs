@@ -264,11 +264,11 @@ unsafe fn verify_folders_and_scroll(root: &Path) -> Result<(), String> {
     }
     // Exercise the actual wheel route, including two high-resolution half ticks.
     RESULT_WHEEL_REMAINDER.with(|value| value.set(0));
-    SendMessageW(list, WM_MOUSEWHEEL, ((-60i16 as u16 as usize) << 16), 0);
+    SendMessageW(list, WM_MOUSEWHEEL, (-60i16 as u16 as usize) << 16, 0);
     if SendMessageW(list, LB_GETTOPINDEX, 0, 0) != 0 {
         return Err("Partial wheel delta was not accumulated.".into());
     }
-    SendMessageW(list, WM_MOUSEWHEEL, ((-60i16 as u16 as usize) << 16), 0);
+    SendMessageW(list, WM_MOUSEWHEEL, (-60i16 as u16 as usize) << 16, 0);
     if SendMessageW(list, LB_GETTOPINDEX, 0, 0) <= 0 {
         return Err("Hidden-scrollbar wheel route did not reveal more results.".into());
     }

@@ -6,6 +6,9 @@ pub(super) unsafe fn verify_and_capture(root: &Path, output: &Path) -> Result<()
         let mut slot = cell.borrow_mut();
         let app = slot.as_mut().unwrap();
         app.show_settings();
+        // The bookmark/provider smoke check visits Search first. Settings
+        // correctly remembers that section; this test explicitly starts General.
+        app.select_settings_section(0);
         app.settings_hwnd
     });
     if parent.is_null() {
