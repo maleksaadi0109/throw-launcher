@@ -3,7 +3,7 @@
 use super::platform::ShellApartment;
 use throw_launcher::files::{self, FileEntry, FILE_CANDIDATES};
 use windows::{
-    core::{IUnknown, Interface, BSTR, GUID, PCWSTR, VARIANT},
+    core::{BSTR, GUID, PCWSTR, VARIANT},
     Win32::System::Com::*,
 };
 
@@ -52,7 +52,7 @@ impl Dispatch {
     }
 
     fn from_variant(value: &VARIANT) -> windows::core::Result<Self> {
-        Ok(Self(IUnknown::try_from(value)?.cast()?))
+        Ok(Self(IDispatch::try_from(value)?))
     }
 }
 
@@ -114,4 +114,22 @@ unsafe fn search_inner(sql: &str) -> Result<Vec<FileEntry>, String> {
         Ok(entries)
     };
     run().map_err(|error| format!("{:#x}", error.code().0))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn automation_objects_roundtrip_as_dispatch_variants() {
+        unsafe {
+            let _apartment = ShellApartment::initialize().unwrap();
+            let clsid = CLSIDFromProgID(windows::core::w!("ADODB.Connection")).unwrap();
+            let connection: IDispatch =
+                CoCreateInstance(&clsid, None, CLSCTX_INPROC_SERVER).unwrap();
+            let value = VARIANT::from(connection);
+            assert!(Dispatch::from_variant(&value).is_ok());
+            assert!(Dispatch::from_variant(&VARIANT::from("not an object")).is_err());
+        }
+    }
 }
