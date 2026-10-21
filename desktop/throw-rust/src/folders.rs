@@ -258,7 +258,10 @@ pub fn browse(input: &str, limit: usize) -> Option<Vec<Folder>> {
             }
         }
     }
-    found.sort_by_key(|f| f.name.to_lowercase());
+    // An explicitly typed existing folder stays first: Enter opens that folder,
+    // not an alphabetically earlier child (or a child replacing it at the cap).
+    let start = usize::from(filter.is_empty() && !found.is_empty());
+    found[start..].sort_by_key(|f| f.name.to_lowercase());
     found.truncate(limit.min(100));
     Some(found)
 }
@@ -291,6 +294,7 @@ mod tests {
         save(&cache, &result.entries).unwrap();
         assert_eq!(load(&cache, true).unwrap().len(), result.entries.len());
         let browse = browse(root.to_str().unwrap(), 50).unwrap();
+        assert_eq!(browse[0].path, root);
         assert!(browse.iter().any(|e| e.name == "Projects"));
         assert!(!browse.iter().any(|e| e.name == "not-a-folder.txt"));
         assert!(Folder::new(PathBuf::from("relative")).is_none());

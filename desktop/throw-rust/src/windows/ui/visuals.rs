@@ -118,7 +118,7 @@ pub(super) unsafe fn paint(app: &App, hwnd: HWND) {
         );
         magnifier(dc, client.right - p(41), p(48), p(19));
 
-        SelectObject(dc, app.heading_font);
+        SelectObject(dc, app.font);
         text(
             dc,
             "Applications & folders",
