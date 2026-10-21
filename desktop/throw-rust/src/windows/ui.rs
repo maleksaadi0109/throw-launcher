@@ -481,7 +481,7 @@ impl App {
             &mut size,
             WS_POPUP | WS_BORDER | WS_CLIPCHILDREN,
             0,
-            WS_EX_APPWINDOW,
+            WS_EX_TOOLWINDOW,
         );
         let height = (size.bottom - size.top).min(work.bottom - work.top - self.px(24));
         let y = rect
@@ -1640,7 +1640,7 @@ unsafe fn run_native() -> Result<(), String> {
         work.bottom = GetSystemMetrics(SM_CYSCREEN);
     }
     let width = app
-        .px(760)
+        .px(640)
         .min((work.right - work.left - app.px(24)).max(app.px(360)));
     let height = app
         .px(716)
@@ -1648,9 +1648,11 @@ unsafe fn run_native() -> Result<(), String> {
     let x = work.left + ((work.right - work.left - width) / 2).max(0);
     let y = work.top + ((work.bottom - work.top - height) / 3).max(0);
     app.hwnd = CreateWindowExW(
-        WS_EX_APPWINDOW,
+        // A launcher is a transient tray utility, not a taskbar application.
+        // Keep activation/keyboard focus: do not use WS_EX_NOACTIVATE.
+        WS_EX_TOOLWINDOW,
         wide(MAIN_CLASS).as_ptr(),
-        wide("Throw Launcher • Rust").as_ptr(),
+        wide("Throw Launcher").as_ptr(),
         WS_POPUP | WS_BORDER | WS_CLIPCHILDREN,
         x,
         y,

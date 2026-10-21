@@ -5,7 +5,7 @@ fn main() {
         winresource::WindowsResource::new()
             .set_icon("branding/throw-rust.ico")
             .set("ProductName", "Throw Launcher")
-            .set("FileDescription", "Throw Launcher — native Rust edition")
+            .set("FileDescription", "Throw Launcher")
             .set("OriginalFilename", "Throw.Rust.exe")
             .set_manifest(
                 r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>

@@ -1,6 +1,7 @@
 //! Native, sectioned Control Center. All pages keep their controls alive so
 //! switching sections never discards a draft or changes the persisted profile.
 use super::*;
+use windows_sys::Win32::System::SystemServices::{SS_LEFT, SS_NOPREFIX};
 use windows_sys::Win32::UI::HiDpi::{
     AdjustWindowRectExForDpi, GetDpiForWindow, SetThreadDpiAwarenessContext,
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
@@ -71,7 +72,7 @@ impl Center {
 
     unsafe fn update_fonts(&mut self) {
         self.delete_fonts();
-        for (i, (size, weight)) in [(16, FW_NORMAL), (26, FW_SEMIBOLD), (13, FW_NORMAL)]
+        for (i, (size, weight)) in [(14, FW_NORMAL), (23, FW_SEMIBOLD), (12, FW_NORMAL)]
             .into_iter()
             .enumerate()
         {
@@ -149,7 +150,15 @@ impl App {
         y: i32,
         height: i32,
     ) -> Result<(), String> {
-        self.settings_control("STATIC", text, 0, 0, section, [224, y, 526, height], 2)?;
+        self.settings_control(
+            "STATIC",
+            text,
+            0,
+            SS_LEFT as u32 | SS_NOPREFIX as u32,
+            section,
+            [228, y, 528, height],
+            2,
+        )?;
         Ok(())
     }
 
@@ -167,9 +176,12 @@ impl App {
             id,
             WS_TABSTOP | BS_AUTOCHECKBOX as u32,
             section,
-            [224, y, 526, 32],
+            [228, y, 528, 34],
             0,
         )?;
+        if SetWindowSubclass(hwnd, Some(settings_checkbox_proc), 1, 0) == 0 {
+            return Err(format!("Cannot apply the native checkbox style: {text}"));
+        }
         SendMessageW(
             hwnd,
             BM_SETCHECK,
@@ -216,6 +228,34 @@ impl App {
         Ok(())
     }
 
+    unsafe fn position_settings_footer(&mut self) {
+        if self.settings_hwnd.is_null() {
+            return;
+        }
+        let mut client: RECT = zeroed();
+        GetClientRect(self.settings_hwnd, &mut client);
+        let logical_height = (client.bottom as f64 / self.center.scale).round() as i32;
+        let button_y = (logical_height - 48).max(420);
+        let scale = self.center.scale;
+        for control in &mut self.center.controls {
+            match GetDlgCtrlID(control.hwnd) as usize {
+                NAV => control.rect = [16, 108, 184, (logical_height - 124).clamp(44, 420)],
+                NOTICE => control.rect = [228, button_y + 5, 300, 28],
+                CANCEL => control.rect = [532, button_y, 100, 36],
+                SAVE => control.rect = [644, button_y, 112, 36],
+                _ => continue,
+            }
+            let [x, y, width, height] = control.rect.map(|v| (v as f64 * scale).round() as i32);
+            MoveWindow(control.hwnd, x, y, width, height, 1);
+        }
+        SendMessageW(
+            GetDlgItem(self.settings_hwnd, NAV as i32),
+            LB_SETITEMHEIGHT,
+            0,
+            self.center.px(44) as isize,
+        );
+    }
+
     pub(super) unsafe fn open_control_center(&mut self) -> Result<(), String> {
         if !self.settings_hwnd.is_null() {
             ShowWindow(self.settings_hwnd, SW_SHOWNORMAL);
@@ -230,7 +270,7 @@ impl App {
             left: 0,
             top: 0,
             right: self.center.px(780),
-            bottom: self.center.px(500),
+            bottom: self.center.px(620),
         };
         let style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN;
         AdjustWindowRectExForDpi(&mut rect, style, 0, WS_EX_CONTROLPARENT, dpi);
@@ -266,7 +306,7 @@ impl App {
                 left: 0,
                 top: 0,
                 right: self.center.px(780),
-                bottom: self.center.px(500),
+                bottom: self.center.px(620),
             };
             AdjustWindowRectExForDpi(&mut rect, style, 0, WS_EX_CONTROLPARENT, actual_dpi);
             SetWindowPos(
@@ -285,8 +325,8 @@ impl App {
             ICON_BIG as usize,
             self.icon as isize,
         );
-        self.settings_control("STATIC", "Throw", 0, 0, ALL, [24, 24, 160, 40], 1)?;
-        self.settings_control("STATIC", "SETTINGS", 0, 0, ALL, [26, 67, 160, 24], 2)?;
+        self.settings_control("STATIC", "Throw", 0, 0, ALL, [24, 24, 160, 36], 1)?;
+        self.settings_control("STATIC", "SETTINGS", 0, 0, ALL, [26, 64, 160, 22], 2)?;
         let nav = self.settings_control(
             "LISTBOX",
             "Settings sections",
@@ -297,38 +337,38 @@ impl App {
                 | LBS_OWNERDRAWFIXED as u32
                 | LBS_NOINTEGRALHEIGHT as u32,
             ALL,
-            [16, 110, 176, 276],
+            [16, 108, 184, 420],
             0,
         )?;
         SendMessageW(nav, LB_SETITEMHEIGHT, 0, self.center.px(44) as isize);
         for (name, _) in SECTIONS {
             SendMessageW(nav, LB_ADDSTRING, 0, wide(name).as_ptr() as isize);
         }
-        self.settings_control("STATIC", "", TITLE, 0, ALL, [224, 26, 526, 38], 1)?;
-        self.settings_control("STATIC", "", SUBTITLE, 0, ALL, [224, 72, 526, 34], 2)?;
+        self.settings_control("STATIC", "", TITLE, 0, ALL, [228, 26, 528, 34], 1)?;
+        self.settings_control("STATIC", "", SUBTITLE, 0, ALL, [228, 66, 528, 34], 2)?;
 
         self.settings_check(
             0,
             STARTUP,
             "Launch at Windows sign-in",
             self.center.startup,
-            128,
+            130,
         )?;
         self.settings_check(
             0,
             HIDE_START,
             "Start with the launcher hidden",
             self.settings.hide_on_startup,
-            180,
+            178,
         )?;
         self.settings_check(
             0,
             HIDE_FOCUS,
             "Hide when the launcher loses focus",
             self.settings.hide_on_focus_loss,
-            232,
+            226,
         )?;
-        self.settings_note(0, "Closing the launcher hides it. Use the tray icon or your global shortcut to open it again.", 290, 50)?;
+        self.settings_note(0, "Closing the launcher hides it. Use the tray icon or your global shortcut to open it again.", 284, 58)?;
 
         self.settings_combo(
             1,
@@ -336,10 +376,10 @@ impl App {
             "Theme",
             &["Graphite — Dark".into(), "Pearl — Light".into()],
             self.settings.theme as usize,
-            128,
+            130,
         )?;
-        self.settings_note(1, "The theme applies to the launcher and Settings when saved. Appearance commands update both immediately.", 220, 54)?;
-        self.settings_note(1, "Three visible result rows, in either theme.\nScroll or use the arrow keys for more results.", 300, 50)?;
+        self.settings_note(1, "The theme applies to the launcher and Settings when saved. Appearance commands update both immediately.", 224, 58)?;
+        self.settings_note(1, "Three visible result rows, in either theme.\nScroll or use the arrow keys for more results.", 304, 52)?;
 
         self.settings_check(2, CALCULATOR, "Calculator", self.settings.calculator, 124)?;
         self.settings_note(
@@ -348,7 +388,7 @@ impl App {
             160,
             25,
         )?;
-        self.settings_check(2, WEB, "Web search", self.settings.web_search, 194)?;
+        self.settings_check(2, WEB, "Web search", self.settings.web_search, 202)?;
         self.settings_note(
             2,
             "Type ? followed by a query to search in your browser.",
@@ -372,15 +412,15 @@ impl App {
             .iter()
             .position(|n| *n == self.settings.max_results)
             .unwrap();
-        self.settings_combo(2, LIMIT, "Scrollable result limit", &values, selected, 270)?;
-        self.settings_note(2, "App and folder search use the existing local index. Folder selection is not available in this edition yet.", 370, 48)?;
+        self.settings_combo(2, LIMIT, "Scrollable result limit", &values, selected, 292)?;
+        self.settings_note(2, "App and folder search use the existing local index. Folder selection is not available in this edition yet.", 392, 60)?;
         self.settings_control(
             "BUTTON",
             "Bookmarks & web providers",
             WEB_MANAGER,
             WS_TABSTOP,
             2,
-            [224, 418, 420, 28],
+            [228, 466, 420, 32],
             0,
         )?;
 
@@ -394,37 +434,37 @@ impl App {
                 "Ctrl + Shift + Space".into(),
             ],
             self.settings.hotkey as usize,
-            128,
+            130,
         )?;
-        self.settings_note(3, "LAUNCHER\nUp / Down    Select result          Enter    Open\nAlt + 1–9     Open ranked result    Esc        Hide\nCtrl + A / C / X / V / Z    Native text editing", 218, 100)?;
-        self.settings_note(3, "SETTINGS\nTab / Shift + Tab    Move between controls\nUp / Down    Switch section when sidebar is focused\nCtrl + 1–6    Jump to section     Ctrl + S    Save\nEsc    Close (asks before discarding changes)", 330, 100)?;
+        self.settings_note(3, "LAUNCHER\nUp / Down    Select result          Enter    Open\nAlt + 1–9     Open ranked result    Esc        Hide\nCtrl + A / C / X / V / Z    Native text editing", 218, 116)?;
+        self.settings_note(3, "SETTINGS\nTab / Shift + Tab    Move between controls\nUp / Down    Switch section when sidebar is focused\nCtrl + 1–6    Jump to section     Ctrl + S    Save\nEsc    Close (asks before discarding changes)", 354, 122)?;
 
         self.settings_check(
             4,
             HISTORY,
             "Remember launch frequency on this device",
             self.settings.remember_history,
-            128,
+            130,
         )?;
-        self.settings_note(4, "At most 100 app counts are kept in your Rust profile.\nTurning this off clears saved counts when you save.", 174, 52)?;
-        self.settings_button(4, CLEAR, "Clear launch history…", [224, 244, 240, 34])?;
-        self.settings_button(4, FOLDER, "Open Rust profile", [480, 244, 240, 34])?;
-        self.settings_button(4, IMPORT, "Import preferences…", [224, 302, 240, 34])?;
-        self.settings_note(4, "Import copies only startup visibility and focus behavior, with a backup. Flow and C# profiles remain untouched.\nWeb queries and opened links go to your browser.", 354, 68)?;
+        self.settings_note(4, "At most 100 app counts are kept in your Rust profile.\nTurning this off clears saved counts when you save.", 176, 58)?;
+        self.settings_button(4, CLEAR, "Clear launch history…", [228, 254, 240, 36])?;
+        self.settings_button(4, FOLDER, "Open Rust profile", [496, 254, 240, 36])?;
+        self.settings_button(4, IMPORT, "Import preferences…", [228, 312, 240, 36])?;
+        self.settings_note(4, "Import copies only startup visibility and focus behavior, with a backup. Flow and C# profiles remain untouched.\nWeb queries and opened links go to your browser.", 372, 84)?;
 
-        self.settings_check(5, LITE, "Lite mode (recommended)", self.settings.lite, 128)?;
-        self.settings_note(5, "Up to 5,000 apps and 10,000 folders, with bounded scans.\nTurning Lite off rebuilds the index with higher limits.", 172, 48)?;
-        self.settings_button(5, MEMORY, "Measure memory now", [224, 238, 240, 34])?;
+        self.settings_check(5, LITE, "Lite mode (recommended)", self.settings.lite, 130)?;
+        self.settings_note(5, "Up to 5,000 apps and 10,000 folders, with bounded scans.\nTurning Lite off rebuilds the index with higher limits.", 176, 58)?;
+        self.settings_button(5, MEMORY, "Measure memory now", [228, 254, 240, 36])?;
         self.memory_label = self.settings_control(
             "STATIC",
             "Measured only on request. A 50 MB working set is not guaranteed.",
             392,
             0,
             5,
-            [224, 288, 526, 62],
+            [228, 302, 528, 56],
             2,
         )?;
-        self.settings_note(5, "Rust edition 0.1 · Native Win32 · No web runtime\nOriginal plugin compatibility is deferred; no .NET plugins are loaded.", 368, 56)?;
+        self.settings_note(5, "Rust edition 0.1 · Native Win32 · No web runtime\nOriginal plugin compatibility is deferred; no .NET plugins are loaded.", 378, 72)?;
 
         self.settings_control(
             "STATIC",
@@ -432,19 +472,20 @@ impl App {
             NOTICE,
             0,
             ALL,
-            [224, 450, 300, 42],
+            [228, 541, 300, 28],
             2,
         )?;
-        self.settings_button(ALL, CANCEL, "Cancel", [534, 450, 100, 34])?;
+        self.settings_button(ALL, CANCEL, "Cancel", [532, 536, 100, 36])?;
         self.settings_control(
             "BUTTON",
             "Save changes",
             SAVE,
             WS_TABSTOP | BS_DEFPUSHBUTTON as u32,
             ALL,
-            [646, 450, 110, 34],
+            [644, 536, 112, 36],
             0,
         )?;
+        self.position_settings_footer();
         self.select_settings_section(self.center.section);
         self.apply_settings_theme();
         ShowWindow(self.settings_hwnd, SW_SHOW);
@@ -620,6 +661,13 @@ impl App {
             size_of::<i32>() as u32,
         );
         for control in &self.center.controls {
+            if [
+                STARTUP, HIDE_START, HIDE_FOCUS, CALCULATOR, WEB, HISTORY, LITE,
+            ]
+            .contains(&(GetDlgCtrlID(control.hwnd) as usize))
+            {
+                SetWindowSubclass(control.hwnd, Some(settings_checkbox_proc), 1, dark as usize);
+            }
             SetWindowTheme(
                 control.hwnd,
                 wide(if dark != 0 {
@@ -651,16 +699,11 @@ impl App {
             rect.bottom - rect.top,
             SWP_NOZORDER | SWP_NOACTIVATE,
         );
+        self.position_settings_footer();
         for control in &self.center.controls {
             let [x, y, w, h] = control.rect.map(|v| self.center.px(v));
             MoveWindow(control.hwnd, x, y, w, h, 1);
         }
-        SendMessageW(
-            GetDlgItem(self.settings_hwnd, NAV as i32),
-            LB_SETITEMHEIGHT,
-            0,
-            self.center.px(44) as isize,
-        );
         InvalidateRect(self.settings_hwnd, null(), 1);
     }
 
@@ -680,6 +723,23 @@ impl App {
             ..client
         };
         FillRect(dc, &sidebar, self.field);
+        let mut rule = RECT {
+            left: self.center.px(207),
+            right: self.center.px(208),
+            top: 0,
+            bottom: client.bottom,
+        };
+        FillRect(dc, &rule, self.selected);
+        let footer_y = client.bottom - self.center.px(66);
+        if footer_y > self.center.px(120) {
+            rule = RECT {
+                left: self.center.px(228),
+                right: client.right - self.center.px(24),
+                top: footer_y,
+                bottom: footer_y + self.center.px(1),
+            };
+            FillRect(dc, &rule, self.selected);
+        }
     }
 
     pub(super) unsafe fn draw_settings_navigation(&self, item: &DRAWITEMSTRUCT) {
@@ -709,6 +769,170 @@ impl App {
             DrawFocusRect(item.hDC, &item.rcItem);
         }
     }
+}
+
+unsafe extern "system" fn settings_checkbox_proc(
+    hwnd: HWND,
+    msg: u32,
+    w: usize,
+    l: isize,
+    subclass: usize,
+    dark: usize,
+) -> isize {
+    if msg == WM_ERASEBKGND {
+        return 1;
+    }
+    if msg == WM_PAINT || msg == WM_PRINTCLIENT {
+        let mut ps: PAINTSTRUCT = zeroed();
+        let dc = if msg == WM_PRINTCLIENT {
+            w as HDC
+        } else {
+            BeginPaint(hwnd, &mut ps)
+        };
+        let mut client: RECT = zeroed();
+        GetClientRect(hwnd, &mut client);
+
+        let background = if dark != 0 {
+            rgb(29, 30, 35)
+        } else {
+            rgb(247, 248, 250)
+        };
+        let foreground = if dark != 0 {
+            rgb(239, 241, 247)
+        } else {
+            rgb(28, 31, 38)
+        };
+        let secondary = if dark != 0 {
+            rgb(153, 159, 173)
+        } else {
+            rgb(115, 121, 133)
+        };
+        let accent = if dark != 0 {
+            rgb(112, 145, 192)
+        } else {
+            rgb(65, 105, 157)
+        };
+        let disabled = IsWindowEnabled(hwnd) == 0;
+        let fill = CreateSolidBrush(background);
+        FillRect(dc, &client, fill);
+        DeleteObject(fill);
+
+        let dpi = GetDpiForWindow(hwnd).max(96) as f64 / 96.0;
+        let side = (16.0 * dpi).round() as i32;
+        let x = (1.0 * dpi).round() as i32;
+        let y = ((client.bottom - side) / 2).max(0);
+        let box_rect = RECT {
+            left: x,
+            top: y,
+            right: x + side,
+            bottom: y + side,
+        };
+        let checked = SendMessageW(hwnd, BM_GETCHECK, 0, 0) == BST_CHECKED as isize;
+        let box_fill = CreateSolidBrush(if checked {
+            accent
+        } else if dark != 0 {
+            rgb(38, 39, 46)
+        } else {
+            rgb(255, 255, 255)
+        });
+        FillRect(dc, &box_rect, box_fill);
+        DeleteObject(box_fill);
+        let border = CreatePen(
+            PS_SOLID,
+            (1.0 * dpi).round().max(1.0) as i32,
+            if checked {
+                accent
+            } else if disabled {
+                secondary
+            } else if dark != 0 {
+                rgb(108, 115, 130)
+            } else {
+                rgb(145, 153, 166)
+            },
+        );
+        let old_pen = SelectObject(dc, border);
+        let old_brush = SelectObject(dc, GetStockObject(NULL_BRUSH as i32));
+        Rectangle(
+            dc,
+            box_rect.left,
+            box_rect.top,
+            box_rect.right,
+            box_rect.bottom,
+        );
+        SelectObject(dc, old_brush);
+        SelectObject(dc, old_pen);
+        DeleteObject(border);
+
+        if checked {
+            let check_pen = CreatePen(
+                PS_SOLID,
+                (2.0 * dpi).round().max(1.0) as i32,
+                if dark != 0 {
+                    rgb(247, 248, 250)
+                } else {
+                    rgb(255, 255, 255)
+                },
+            );
+            let old = SelectObject(dc, check_pen);
+            let mut point = POINT {
+                x: box_rect.left + (4.0 * dpi).round() as i32,
+                y: box_rect.top + (8.0 * dpi).round() as i32,
+            };
+            MoveToEx(dc, point.x, point.y, null_mut());
+            point.x = box_rect.left + (7.0 * dpi).round() as i32;
+            point.y = box_rect.top + (11.0 * dpi).round() as i32;
+            LineTo(dc, point.x, point.y);
+            point.x = box_rect.left + (13.0 * dpi).round() as i32;
+            point.y = box_rect.top + (5.0 * dpi).round() as i32;
+            LineTo(dc, point.x, point.y);
+            SelectObject(dc, old);
+            DeleteObject(check_pen);
+        }
+
+        let length = GetWindowTextLengthW(hwnd).max(0) as usize;
+        let mut text = vec![0u16; length + 1];
+        if length > 0 {
+            GetWindowTextW(hwnd, text.as_mut_ptr(), text.len() as i32);
+        }
+        let old_font = SendMessageW(hwnd, WM_GETFONT, 0, 0);
+        let old_font = if old_font != 0 {
+            SelectObject(dc, old_font as HGDIOBJ)
+        } else {
+            null_mut()
+        };
+        SetBkMode(dc, TRANSPARENT as i32);
+        SetTextColor(dc, if disabled { secondary } else { foreground });
+        let mut text_rect = client;
+        text_rect.left = box_rect.right + (9.0 * dpi).round() as i32;
+        DrawTextW(
+            dc,
+            text.as_ptr(),
+            length as i32,
+            &mut text_rect,
+            DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX,
+        );
+        if old_font != null_mut() {
+            SelectObject(dc, old_font);
+        }
+
+        if GetFocus() == hwnd {
+            let mut focus = client;
+            InflateRect(
+                &mut focus,
+                -(2.0 * dpi).round() as i32,
+                -(2.0 * dpi).round() as i32,
+            );
+            DrawFocusRect(dc, &focus);
+        }
+        if msg == WM_PAINT {
+            EndPaint(hwnd, &ps);
+        }
+        return 0;
+    }
+    if msg == WM_NCDESTROY {
+        RemoveWindowSubclass(hwnd, Some(settings_checkbox_proc), subclass);
+    }
+    DefSubclassProc(hwnd, msg, w, l)
 }
 
 /// Run before IsDialogMessage so shortcuts work in every native child control.

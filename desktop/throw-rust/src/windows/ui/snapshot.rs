@@ -7,6 +7,20 @@ use std::{
 };
 
 pub(super) unsafe fn verify_and_capture(root: &Path) -> Result<(), String> {
+    APP.with(|cell| {
+        let slot = cell.borrow();
+        let app = slot.as_ref().unwrap();
+        let style = GetWindowLongPtrW(app.hwnd, GWL_EXSTYLE) as u32;
+        if style & WS_EX_APPWINDOW != 0 || style & WS_EX_TOOLWINDOW == 0 {
+            return Err("Launcher must stay out of the taskbar.".to_string());
+        }
+        let mut client: RECT = zeroed();
+        GetClientRect(app.hwnd, &mut client);
+        if client.right > app.px(640) {
+            return Err("Launcher exceeds its compact width.".to_string());
+        }
+        Ok(())
+    })?;
     verify_edit_shortcuts()?;
     verify_folders_and_scroll(root)?;
     verify_command_palette()?;

@@ -1,5 +1,14 @@
 # Throw Launcher — native Rust edition
 
+## Compact desktop appearance
+
+The launcher is 640 logical pixels wide with three visible results. It stays
+out of the Windows taskbar and Alt+Tab; use the global shortcut or notification
+area icon to reopen it. Right-click the tray icon to open Settings or quit.
+The same blue launch mark is embedded in the executable and used by the tray
+and Settings window. Windows may retain an older executable icon in its cache;
+extract a new build into a fresh folder before starting it.
+
 An experimental Windows launcher rebuilt in Rust with **native Win32 controls**.
 No WPF, .NET runtime, Electron, WebView2, browser process, or background telemetry.
 The existing C# edition is preserved alongside this version.
