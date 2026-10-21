@@ -5,6 +5,11 @@
 The launcher is 640 logical pixels wide with three visible results. It stays
 out of the Windows taskbar and Alt+Tab; use the global shortcut or notification
 area icon to reopen it. Right-click the tray icon to open Settings or quit.
+The global shortcut opens Throw on the foreground window's monitor and focuses
+the search field, even when Throw is already visible but another app is active.
+Settings fits its full content and Save/Cancel controls inside the monitor's
+usable area, including at high DPI. Power and system commands use the original
+Flow Launcher command icons under its MIT license (see the included notice).
 The same blue launch mark is embedded in the executable and used by the tray
 and Settings window. Windows may retain an older executable icon in its cache;
 extract a new build into a fresh folder before starting it.

@@ -1,6 +1,9 @@
 //! Native, sectioned Control Center. All pages keep their controls alive so
 //! switching sections never discards a draft or changes the persisted profile.
 use super::*;
+use windows_sys::Win32::Graphics::Gdi::{
+    GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+};
 use windows_sys::Win32::System::SystemServices::{SS_LEFT, SS_NOPREFIX};
 use windows_sys::Win32::UI::HiDpi::{
     AdjustWindowRectExForDpi, GetDpiForWindow, SetThreadDpiAwarenessContext,
@@ -9,9 +12,9 @@ use windows_sys::Win32::UI::HiDpi::{
 
 pub(super) const NAV: usize = 400;
 pub(super) const CANCEL: usize = 401;
-const TITLE: usize = 402;
+pub(super) const TITLE: usize = 402;
 const SUBTITLE: usize = 403;
-const NOTICE: usize = 404;
+pub(super) const NOTICE: usize = 404;
 const ALL: usize = usize::MAX;
 const SECTIONS: [(&str, &str); 6] = [
     ("General", "Choose how Throw fits into your day."),
@@ -30,6 +33,15 @@ struct Control {
     section: usize,
     rect: [i32; 4],
     font: usize,
+    static_painter: Option<Box<StaticPaintData>>,
+}
+
+struct StaticPaintData {
+    dark: std::cell::Cell<bool>,
+    sidebar: bool,
+    muted: bool,
+    notice: bool,
+    error: std::cell::Cell<bool>,
 }
 
 pub(super) struct Center {
@@ -134,11 +146,29 @@ impl App {
             return Err(format!("Cannot create the Settings control: {text}"));
         }
         SendMessageW(hwnd, WM_SETFONT, self.center.fonts[font] as usize, 0);
+        let mut static_painter = if class == "STATIC" {
+            Some(Box::new(StaticPaintData {
+                dark: std::cell::Cell::new(self.settings.theme == Theme::Ink),
+                sidebar: rect[0] < 208,
+                muted: font == 2,
+                notice: id == NOTICE,
+                error: std::cell::Cell::new(false),
+            }))
+        } else {
+            None
+        };
+        if let Some(painter) = static_painter.as_mut() {
+            let ref_data = (&mut **painter as *mut StaticPaintData) as usize;
+            if SetWindowSubclass(hwnd, Some(settings_static_proc), 1, ref_data) == 0 {
+                return Err(format!("Cannot apply the native text style: {text}"));
+            }
+        }
         self.center.controls.push(Control {
             hwnd,
             section,
             rect,
             font,
+            static_painter,
         });
         Ok(hwnd)
     }
@@ -258,34 +288,31 @@ impl App {
 
     pub(super) unsafe fn open_control_center(&mut self) -> Result<(), String> {
         if !self.settings_hwnd.is_null() {
+            self.fit_settings_to_launcher_monitor(GetDpiForWindow(self.hwnd).max(96));
             ShowWindow(self.settings_hwnd, SW_SHOWNORMAL);
             SetForegroundWindow(self.settings_hwnd);
             return Ok(());
         }
         self.center.startup = startup_enabled()?;
-        self.center.scale = GetDpiForWindow(self.hwnd).max(96) as f64 / 96.0;
+        let dpi = GetDpiForWindow(self.hwnd).max(96);
+        let (scale, bounds) = self.settings_bounds_for_monitor(dpi);
+        self.center.scale = scale;
         self.center.update_fonts();
-        let dpi = (96.0 * self.center.scale).round() as u32;
-        let mut rect = RECT {
-            left: 0,
-            top: 0,
-            right: self.center.px(780),
-            bottom: self.center.px(620),
-        };
         let style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN;
-        AdjustWindowRectExForDpi(&mut rect, style, 0, WS_EX_CONTROLPARENT, dpi);
         // Mixed-mode DPI: leave the existing launcher awareness unchanged,
         // while Settings handles per-monitor font/geometry changes itself.
         let previous_dpi = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        let x = bounds.left;
+        let y = bounds.top;
         self.settings_hwnd = CreateWindowExW(
             WS_EX_CONTROLPARENT,
             wide(SETTINGS_CLASS).as_ptr(),
             wide("Throw Settings").as_ptr(),
             style,
-            CW_USEDEFAULT,
-            CW_USEDEFAULT,
-            rect.right - rect.left,
-            rect.bottom - rect.top,
+            x,
+            y,
+            bounds.right - bounds.left,
+            bounds.bottom - bounds.top,
             self.hwnd,
             null_mut(),
             self.instance,
@@ -296,28 +323,6 @@ impl App {
         }
         if self.settings_hwnd.is_null() {
             return Err("Cannot open Throw Settings.".into());
-        }
-        // CW_USEDEFAULT may choose a monitor other than the launcher's.
-        let actual_dpi = GetDpiForWindow(self.settings_hwnd).max(96);
-        if actual_dpi != dpi {
-            self.center.scale = actual_dpi as f64 / 96.0;
-            self.center.update_fonts();
-            rect = RECT {
-                left: 0,
-                top: 0,
-                right: self.center.px(780),
-                bottom: self.center.px(620),
-            };
-            AdjustWindowRectExForDpi(&mut rect, style, 0, WS_EX_CONTROLPARENT, actual_dpi);
-            SetWindowPos(
-                self.settings_hwnd,
-                null_mut(),
-                0,
-                0,
-                rect.right - rect.left,
-                rect.bottom - rect.top,
-                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
-            );
         }
         SendMessageW(
             self.settings_hwnd,
@@ -594,11 +599,14 @@ impl App {
 
     pub(super) unsafe fn settings_notice(&mut self, text: &str, error: bool) {
         self.center.error = error;
-        SetWindowTextW(
-            GetDlgItem(self.settings_hwnd, NOTICE as i32),
-            wide(text).as_ptr(),
-        );
-        InvalidateRect(GetDlgItem(self.settings_hwnd, NOTICE as i32), null(), 1);
+        let notice = GetDlgItem(self.settings_hwnd, NOTICE as i32);
+        if let Some(control) = self.center.controls.iter_mut().find(|c| c.hwnd == notice) {
+            if let Some(painter) = control.static_painter.as_mut() {
+                painter.error.set(error);
+            }
+        }
+        SetWindowTextW(notice, wide(text).as_ptr());
+        InvalidateRect(notice, null(), 1);
     }
 
     pub(super) unsafe fn settings_control_color(&self, dc: HDC, hwnd: HWND) -> isize {
@@ -654,6 +662,14 @@ impl App {
             return;
         }
         let dark = (self.settings.theme == Theme::Ink) as i32;
+        for control in &self.center.controls {
+            if let Some(painter) = control.static_painter.as_ref() {
+                painter.dark.set(dark != 0);
+                if painter.notice {
+                    painter.error.set(self.center.error);
+                }
+            }
+        }
         windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute(
             self.settings_hwnd,
             20,
@@ -688,23 +704,110 @@ impl App {
     }
 
     pub(super) unsafe fn settings_dpi_changed(&mut self, dpi: u32, rect: &RECT) {
-        self.center.scale = dpi as f64 / 96.0;
+        self.fit_settings_to_monitor(dpi.max(96), Some(rect));
+    }
+
+    unsafe fn fit_settings_to_launcher_monitor(&mut self, dpi: u32) {
+        self.fit_settings_to_monitor(dpi, None);
+    }
+
+    unsafe fn fit_settings_to_monitor(&mut self, dpi: u32, target: Option<&RECT>) {
+        let previous_dpi = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        let (scale, bounds) = self.settings_bounds_at(dpi, target);
+        self.center.scale = scale;
         self.center.update_fonts();
         SetWindowPos(
             self.settings_hwnd,
             null_mut(),
-            rect.left,
-            rect.top,
-            rect.right - rect.left,
-            rect.bottom - rect.top,
-            SWP_NOZORDER | SWP_NOACTIVATE,
+            bounds.left,
+            bounds.top,
+            bounds.right - bounds.left,
+            bounds.bottom - bounds.top,
+            SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW,
         );
-        self.position_settings_footer();
         for control in &self.center.controls {
             let [x, y, w, h] = control.rect.map(|v| self.center.px(v));
             MoveWindow(control.hwnd, x, y, w, h, 1);
         }
-        InvalidateRect(self.settings_hwnd, null(), 1);
+        self.position_settings_footer();
+        RedrawWindow(
+            self.settings_hwnd,
+            null(),
+            null_mut(),
+            RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN,
+        );
+        if !previous_dpi.is_null() {
+            SetThreadDpiAwarenessContext(previous_dpi);
+        }
+    }
+
+    unsafe fn settings_bounds_for_monitor(&self, dpi: u32) -> (f64, RECT) {
+        self.settings_bounds_at(dpi, None)
+    }
+
+    unsafe fn settings_bounds_at(&self, dpi: u32, target: Option<&RECT>) -> (f64, RECT) {
+        let previous_dpi = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        let mut monitor_info: MONITORINFO = zeroed();
+        monitor_info.cbSize = size_of::<MONITORINFO>() as u32;
+        let monitor = target.map_or_else(
+            || MonitorFromWindow(self.hwnd, MONITOR_DEFAULTTONEAREST),
+            |rect| MonitorFromRect(rect, MONITOR_DEFAULTTONEAREST),
+        );
+        let work = if !monitor.is_null() && GetMonitorInfoW(monitor, &mut monitor_info) != 0 {
+            monitor_info.rcWork
+        } else {
+            let mut fallback: RECT = zeroed();
+            SystemParametersInfoW(SPI_GETWORKAREA, 0, (&mut fallback as *mut RECT).cast(), 0);
+            fallback
+        };
+        let work_width = (work.right - work.left).max(1);
+        let work_height = (work.bottom - work.top).max(1);
+        let dpi_scale = dpi.max(96) as f64 / 96.0;
+        let style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN;
+        let mut scale = dpi_scale;
+        // Frame thickness is DPI-sized while the content can be proportionally
+        // reduced to keep every section and the footer inside the work area.
+        let mut client_scale = dpi_scale;
+        for _ in 0..2 {
+            let mut frame = RECT {
+                left: 0,
+                top: 0,
+                right: (780.0 * client_scale).round() as i32,
+                bottom: (620.0 * client_scale).round() as i32,
+            };
+            AdjustWindowRectExForDpi(&mut frame, style, 0, WS_EX_CONTROLPARENT, dpi.max(96));
+            let available_width = (work_width - 16).max(1);
+            let available_height = (work_height - 16).max(1);
+            let factor = (available_width as f64 / (frame.right - frame.left).max(1) as f64)
+                .min(available_height as f64 / (frame.bottom - frame.top).max(1) as f64)
+                .min(1.0);
+            client_scale *= factor;
+            scale = client_scale;
+        }
+        let mut frame = RECT {
+            left: 0,
+            top: 0,
+            right: (780.0 * scale).round() as i32,
+            bottom: (620.0 * scale).round() as i32,
+        };
+        AdjustWindowRectExForDpi(&mut frame, style, 0, WS_EX_CONTROLPARENT, dpi.max(96));
+        let width = (frame.right - frame.left).min(work_width).max(1);
+        let height = (frame.bottom - frame.top).min(work_height).max(1);
+        let left = work.left + (work_width - width) / 2;
+        let top = work.top + (work_height - height) / 2;
+        let result = (
+            scale,
+            RECT {
+                left,
+                top,
+                right: left + width,
+                bottom: top + height,
+            },
+        );
+        if !previous_dpi.is_null() {
+            SetThreadDpiAwarenessContext(previous_dpi);
+        }
+        result
     }
 
     pub(super) unsafe fn paint_control_center(&self) {
@@ -931,6 +1034,94 @@ unsafe extern "system" fn settings_checkbox_proc(
     }
     if msg == WM_NCDESTROY {
         RemoveWindowSubclass(hwnd, Some(settings_checkbox_proc), subclass);
+    }
+    DefSubclassProc(hwnd, msg, w, l)
+}
+
+unsafe extern "system" fn settings_static_proc(
+    hwnd: HWND,
+    msg: u32,
+    w: usize,
+    l: isize,
+    subclass: usize,
+    ref_data: usize,
+) -> isize {
+    if msg == WM_ERASEBKGND {
+        return 1;
+    }
+    if msg == WM_PAINT || msg == WM_PRINTCLIENT {
+        let data = &*(ref_data as *const StaticPaintData);
+        let mut ps: PAINTSTRUCT = zeroed();
+        let dc = if msg == WM_PRINTCLIENT {
+            w as HDC
+        } else {
+            BeginPaint(hwnd, &mut ps)
+        };
+        let dark = data.dark.get();
+        let background = if data.sidebar {
+            if dark {
+                rgb(38, 39, 46)
+            } else {
+                rgb(255, 255, 255)
+            }
+        } else if dark {
+            rgb(29, 30, 35)
+        } else {
+            rgb(247, 248, 250)
+        };
+        let foreground = if data.notice && data.error.get() {
+            if dark {
+                rgb(255, 164, 157)
+            } else {
+                rgb(170, 40, 35)
+            }
+        } else if data.muted {
+            if dark {
+                rgb(153, 159, 173)
+            } else {
+                rgb(115, 121, 133)
+            }
+        } else if dark {
+            rgb(239, 241, 247)
+        } else {
+            rgb(28, 31, 38)
+        };
+        let fill = CreateSolidBrush(background);
+        let mut client: RECT = zeroed();
+        GetClientRect(hwnd, &mut client);
+        FillRect(dc, &client, fill);
+        DeleteObject(fill);
+
+        let length = GetWindowTextLengthW(hwnd).max(0) as usize;
+        let mut text = vec![0u16; length + 1];
+        if length > 0 {
+            GetWindowTextW(hwnd, text.as_mut_ptr(), text.len() as i32);
+        }
+        let font = SendMessageW(hwnd, WM_GETFONT, 0, 0);
+        let old_font = if font != 0 {
+            SelectObject(dc, font as HGDIOBJ)
+        } else {
+            null_mut()
+        };
+        SetBkMode(dc, TRANSPARENT as i32);
+        SetTextColor(dc, foreground);
+        DrawTextW(
+            dc,
+            text.as_ptr(),
+            length as i32,
+            &mut client,
+            DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX,
+        );
+        if old_font != null_mut() {
+            SelectObject(dc, old_font);
+        }
+        if msg == WM_PAINT {
+            EndPaint(hwnd, &ps);
+        }
+        return 0;
+    }
+    if msg == WM_NCDESTROY {
+        RemoveWindowSubclass(hwnd, Some(settings_static_proc), subclass);
     }
     DefSubclassProc(hwnd, msg, w, l)
 }

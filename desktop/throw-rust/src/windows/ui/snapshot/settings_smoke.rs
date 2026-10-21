@@ -1,5 +1,8 @@
 //! Runs on Windows only, inside the isolated --smoke-test profile.
 use super::*;
+use windows_sys::Win32::UI::HiDpi::{
+    SetThreadDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+};
 
 pub(super) unsafe fn verify_and_capture(root: &Path, output: &Path) -> Result<(), String> {
     let parent = APP.with(|cell| {
@@ -14,6 +17,30 @@ pub(super) unsafe fn verify_and_capture(root: &Path, output: &Path) -> Result<()
     if parent.is_null() {
         return Err("Settings failed to open.".into());
     }
+    verify_settings_bounds(parent)?;
+    // WM_PAINT and WM_PRINTCLIENT must be independent of APP: native window
+    // painting can occur synchronously while the UI owns its mutable borrow.
+    APP.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        let app = slot.as_mut().unwrap();
+        app.settings.theme = Theme::Ink;
+        app.apply_settings_theme();
+        let title = GetDlgItem(parent, settings::TITLE as i32);
+        let notice = GetDlgItem(parent, settings::NOTICE as i32);
+        for control in [title, notice] {
+            InvalidateRect(control, null(), 1);
+            UpdateWindow(control);
+            let dc = GetDC(control);
+            if !dc.is_null() {
+                SendMessageW(control, WM_PRINTCLIENT, dc as usize, PRF_CLIENT as isize);
+                ReleaseDC(control, dc);
+            }
+        }
+        app.settings_notice("Painted while Settings is open.", true);
+        let notice = GetDlgItem(parent, settings::NOTICE as i32);
+        InvalidateRect(notice, null(), 1);
+        UpdateWindow(notice);
+    });
     settle();
     let nav = GetDlgItem(parent, settings::NAV as i32);
     let save = GetDlgItem(parent, SAVE as i32);
@@ -184,6 +211,7 @@ pub(super) unsafe fn verify_and_capture(root: &Path, output: &Path) -> Result<()
             dpi as usize | ((dpi as usize) << 16),
             (&rect as *const RECT) as isize,
         );
+        verify_settings_bounds(parent)?;
         APP.with(|cell| {
             cell.borrow_mut()
                 .as_mut()
@@ -240,6 +268,87 @@ pub(super) unsafe fn verify_and_capture(root: &Path, output: &Path) -> Result<()
     });
     verify_import(root)?;
     Ok(())
+}
+
+unsafe fn verify_settings_bounds(parent: HWND) -> Result<(), String> {
+    let previous = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    let result = (|| {
+        let launcher = GetParent(parent);
+        let monitor = MonitorFromWindow(launcher, MONITOR_DEFAULTTONEAREST);
+        let mut info: MONITORINFO = zeroed();
+        info.cbSize = size_of::<MONITORINFO>() as u32;
+        if monitor.is_null() || GetMonitorInfoW(monitor, &mut info) == 0 {
+            return Err("Cannot read the launcher monitor work area.".into());
+        }
+        let work = info.rcWork;
+        let mut bounds: RECT = zeroed();
+        GetWindowRect(parent, &mut bounds);
+        if bounds.left < work.left
+            || bounds.top < work.top
+            || bounds.right > work.right
+            || bounds.bottom > work.bottom
+        {
+            return Err(format!(
+                "Settings window does not fit the launcher work area: {},{},{},{} outside {},{},{},{}.",
+                bounds.left,
+                bounds.top,
+                bounds.right,
+                bounds.bottom,
+                work.left,
+                work.top,
+                work.right,
+                work.bottom
+            ));
+        }
+        if (bounds.left + bounds.right - work.left - work.right).abs() > 1
+            || (bounds.top + bounds.bottom - work.top - work.bottom).abs() > 1
+        {
+            return Err("Settings is not centered on the launcher monitor.".into());
+        }
+        let mut child = GetWindow(parent, GW_CHILD);
+        while !child.is_null() {
+            if IsWindowVisible(child) != 0 {
+                let mut child_bounds: RECT = zeroed();
+                GetWindowRect(child, &mut child_bounds);
+                MapWindowPoints(
+                    null_mut(),
+                    parent,
+                    (&mut child_bounds as *mut RECT).cast(),
+                    2,
+                );
+                let mut client: RECT = zeroed();
+                GetClientRect(parent, &mut client);
+                if child_bounds.left < client.left
+                    || child_bounds.top < client.top
+                    || child_bounds.right > client.right
+                    || child_bounds.bottom > client.bottom
+                {
+                    return Err(format!(
+                        "Visible Settings control {} is clipped: {},{},{},{} in {},{}.",
+                        GetDlgCtrlID(child),
+                        child_bounds.left,
+                        child_bounds.top,
+                        child_bounds.right,
+                        child_bounds.bottom,
+                        client.right,
+                        client.bottom
+                    ));
+                }
+            }
+            child = GetWindow(child, GW_HWNDNEXT);
+        }
+        for id in [settings::CANCEL, SAVE] {
+            let control = GetDlgItem(parent, id as i32);
+            if IsWindowVisible(control) == 0 {
+                return Err("Settings Save or Cancel is outside the visible window.".into());
+            }
+        }
+        Ok(())
+    })();
+    if !previous.is_null() {
+        SetThreadDpiAwarenessContext(previous);
+    }
+    result
 }
 
 unsafe fn verify_import(root: &Path) -> Result<(), String> {

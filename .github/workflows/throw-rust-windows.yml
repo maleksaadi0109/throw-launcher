@@ -82,6 +82,7 @@ jobs:
           Copy-Item branding/throw-rust.ico "$out/package/Throw-Launcher.ico"
           Copy-Item README.md "$out/package/README.md"
           Copy-Item ../../LICENSE "$out/package/LICENSE.txt"
+          Copy-Item branding/commands/NOTICE.txt "$out/package/Flow-command-icons-NOTICE.txt"
           Copy-Item ./target/release/smoke-result.txt "$out/package/CI-memory-sample.txt"
           Copy-Item ./target/release/file-search-benchmark.txt "$out/package/CI-file-search-benchmark.txt"
           Compress-Archive "$out/package/*" "$out/Throw-Rust-Windows-x64.zip"

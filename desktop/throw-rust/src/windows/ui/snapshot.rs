@@ -21,9 +21,28 @@ pub(super) unsafe fn verify_and_capture(root: &Path) -> Result<(), String> {
         }
         Ok(())
     })?;
+    verify_launcher_activation()?;
     verify_edit_shortcuts()?;
     verify_folders_and_scroll(root)?;
     verify_command_palette()?;
+    APP.with(|cell| {
+        let slot = cell.borrow();
+        let app = slot.as_ref().unwrap();
+        for id in 100usize..=113 {
+            let icon = LoadImageW(
+                app.instance,
+                id as *const u16,
+                IMAGE_ICON,
+                32,
+                32,
+                LR_SHARED,
+            );
+            if icon.is_null() {
+                return Err(format!("Embedded Flow command icon {id} is missing."));
+            }
+        }
+        Ok(())
+    })?;
     super::web_smoke::verify(root)?;
     let menu = actions::build_menu();
     if menu.is_null() || GetMenuItemCount(menu) != 7 {
@@ -137,6 +156,55 @@ pub(super) unsafe fn verify_and_capture(root: &Path) -> Result<(), String> {
     let report = format!("{}\nReal Shell icons loaded for apps and folders.\nThree-row viewport, native scrolling, folder/path search and background-selection stability verified.\nNative Ctrl+A/C/V/X/Z editing verified with focus in search and results. Alt+1 calculator activation verified.\nCommand palette binding, reboot alias and native confirmation cancellation verified. No power/session/delete action was executed; successful system changes require real-device testing.\nSettings: six sections, keyboard focus, draft preservation, save/reload, failed-save recovery, theme-command synchronization and 96/144/192 DPI layout verified. Native captures include all six sections in both themes and Appearance at 150%/200%. Real mixed-monitor dragging still needs device verification.\nApp and folder menus constructed; shortcut target resolution covered by Windows tests. No apps, folders or elevated processes launched.\n{count} icons cached. Lite maximum 48; Standard maximum 96.\nThis CI sample is not a real-world idle memory benchmark.", memory_report()?);
     let report = format!("{report}\nNative bookmark opt-in/disable, fixture discovery, safe URL binding, error reporting and provider create/edit/disable/delete persistence verified. Invalid and failed saves preserved previous settings. No personal browser profiles read or browsers launched.");
     std::fs::write(root.join("smoke-result.txt"), report).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+unsafe fn verify_launcher_activation() -> Result<(), String> {
+    let (hwnd, edit, instance) = APP.with(|cell| {
+        let slot = cell.borrow();
+        let app = slot.as_ref().unwrap();
+        (app.hwnd, app.edit, app.instance)
+    });
+    // Simulate another focused window without launching another application.
+    let work = placement::work_area(hwnd);
+    let helper = CreateWindowExW(
+        WS_EX_TOOLWINDOW,
+        wide("STATIC").as_ptr(),
+        wide("Throw activation test").as_ptr(),
+        WS_POPUP | WS_VISIBLE,
+        work.left + 20,
+        work.top + 20,
+        160,
+        80,
+        null_mut(),
+        null_mut(),
+        instance,
+        null(),
+    );
+    if helper.is_null() {
+        return Err("Cannot create activation test window.".into());
+    }
+    SetForegroundWindow(helper);
+    SetFocus(helper);
+    SendMessageW(hwnd, WM_HOTKEY, HOTKEY_ID as usize, 0);
+    settle();
+    let focused = GetForegroundWindow() == hwnd && GetFocus() == edit;
+    let monitor_matches = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)
+        == MonitorFromWindow(helper, MONITOR_DEFAULTTONEAREST);
+    DestroyWindow(helper);
+    if !focused || !monitor_matches {
+        return Err("Hotkey did not focus search on the active window's monitor.".into());
+    }
+    // Pressing again while Throw itself is focused is the only hide toggle.
+    SendMessageW(hwnd, WM_HOTKEY, HOTKEY_ID as usize, 0);
+    if IsWindowVisible(hwnd) != 0 {
+        return Err("Focused hotkey toggle did not hide Throw.".into());
+    }
+    SendMessageW(hwnd, WM_HOTKEY, HOTKEY_ID as usize, 0);
+    settle();
+    if GetFocus() != edit {
+        return Err("Reopened launcher did not focus the search box.".into());
+    }
     Ok(())
 }
 

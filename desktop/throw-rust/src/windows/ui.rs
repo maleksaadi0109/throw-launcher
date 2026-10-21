@@ -1,7 +1,9 @@
 use super::icons::{IconCache, ICONS_READY};
 use super::platform::*;
 mod actions;
+mod command_icons;
 
+mod placement;
 mod settings;
 mod snapshot;
 mod visuals;
@@ -41,6 +43,8 @@ const INDEX_READY: u32 = WM_APP + 2;
 
 const FILES_READY: u32 = WM_APP + 5;
 const FIT_RESULTS: u32 = WM_APP + 4;
+const SHOW_REQUEST: u32 = WM_APP + 6;
+const APPLY_LAUNCHER_DPI: u32 = WM_APP + 7;
 const SEARCH: usize = 101;
 const RESULTS: usize = 102;
 const SETTINGS_BUTTON: usize = 103;
@@ -464,10 +468,7 @@ impl App {
     }
 
     unsafe fn fit_results(&self) {
-        let mut work: RECT = zeroed();
-        if SystemParametersInfoW(SPI_GETWORKAREA, 0, (&mut work as *mut RECT).cast(), 0) == 0 {
-            return;
-        }
+        let work = placement::work_area(self.hwnd);
         let mut rect: RECT = zeroed();
         GetWindowRect(self.hwnd, &mut rect);
         let rows = 3;
@@ -490,7 +491,10 @@ impl App {
         SetWindowPos(
             self.hwnd,
             null_mut(),
-            rect.left,
+            rect.left.clamp(
+                work.left,
+                (work.right - (rect.right - rect.left)).max(work.left),
+            ),
             y,
             rect.right - rect.left,
             height,
@@ -501,10 +505,113 @@ impl App {
     }
 
     unsafe fn show(&self) {
+        // Capture the user's active window BEFORE activating Throw. Using the
+        // launcher's previous position would reopen it on the wrong monitor.
+        let work = placement::work_area(GetForegroundWindow());
+        let bounds = placement::centered(work, self.px(640), self.px(352), self.px(12));
+        SetWindowPos(
+            self.hwnd,
+            null_mut(),
+            bounds.left,
+            bounds.top,
+            bounds.right - bounds.left,
+            bounds.bottom - bounds.top,
+            SWP_NOZORDER | SWP_NOACTIVATE,
+        );
+        self.layout();
         ShowWindow(self.hwnd, SW_SHOWNORMAL);
-        SetForegroundWindow(self.hwnd);
+        if SetForegroundWindow(self.hwnd) == 0 {
+            // The hotkey normally grants foreground rights. If Windows kept
+            // another input queue active, join it only for this explicit open.
+            let foreground = GetForegroundWindow();
+            let thread = GetWindowThreadProcessId(foreground, null_mut());
+            let current = GetCurrentThreadId();
+            if thread != 0 && thread != current && AttachThreadInput(current, thread, 1) != 0 {
+                BringWindowToTop(self.hwnd);
+                SetForegroundWindow(self.hwnd);
+                SetFocus(self.edit);
+                AttachThreadInput(current, thread, 0);
+            }
+        }
         SetFocus(self.edit);
         SendMessageW(self.edit, EM_SETSEL, 0, -1);
+    }
+
+    unsafe fn launcher_dpi_changed(&mut self, dpi: u32) {
+        self.scale = dpi.max(96) as f64 / 96.0;
+        let next = [
+            (17, FW_NORMAL),
+            (12, FW_NORMAL),
+            (29, FW_BOLD),
+            (21, FW_NORMAL),
+        ]
+        .map(|(size, weight)| {
+            CreateFontW(
+                -(size as f64 * self.scale).round() as i32,
+                0,
+                0,
+                0,
+                weight as i32,
+                0,
+                0,
+                0,
+                DEFAULT_CHARSET as u32,
+                OUT_DEFAULT_PRECIS as u32,
+                CLIP_DEFAULT_PRECIS as u32,
+                CLEARTYPE_QUALITY as u32,
+                DEFAULT_PITCH as u32,
+                wide("Segoe UI").as_ptr(),
+            )
+        });
+        if next.iter().any(|font| font.is_null()) {
+            for font in next {
+                if !font.is_null() {
+                    DeleteObject(font);
+                }
+            }
+            return;
+        }
+        let old = [
+            self.font,
+            self.small_font,
+            self.heading_font,
+            self.input_font,
+        ];
+        [
+            self.font,
+            self.small_font,
+            self.heading_font,
+            self.input_font,
+        ] = next;
+        for (control, font) in [
+            (self.edit, self.input_font),
+            (self.list, self.font),
+            (self.status, self.small_font),
+        ] {
+            SendMessageW(control, WM_SETFONT, font as usize, 0);
+        }
+        for font in old {
+            DeleteObject(font);
+        }
+        SendMessageW(self.list, LB_SETITEMHEIGHT, 0, self.px(64) as isize);
+        let work = placement::work_area(self.hwnd);
+        let bounds = placement::centered(work, self.px(640), self.px(352), self.px(12));
+        SetWindowPos(
+            self.hwnd,
+            null_mut(),
+            bounds.left,
+            bounds.top,
+            bounds.right - bounds.left,
+            bounds.bottom - bounds.top,
+            SWP_NOZORDER | SWP_NOACTIVATE,
+        );
+        self.layout();
+        RedrawWindow(
+            self.hwnd,
+            null(),
+            null_mut(),
+            RDW_INVALIDATE | RDW_ALLCHILDREN,
+        );
     }
 
     fn row_identity(&self, row: &ResultRow) -> String {
@@ -943,6 +1050,14 @@ impl App {
 
     unsafe fn dispatch(&mut self, hwnd: HWND, msg: u32, w: usize, l: isize) -> Option<isize> {
         match msg {
+            SHOW_REQUEST => {
+                self.show();
+                Some(0)
+            }
+            APPLY_LAUNCHER_DPI => {
+                self.launcher_dpi_changed(w as u32);
+                Some(0)
+            }
             FIT_RESULTS => {
                 self.fit_results();
                 RedrawWindow(
@@ -1123,7 +1238,7 @@ impl App {
                 Some(0)
             }
             WM_HOTKEY => {
-                if IsWindowVisible(self.hwnd) != 0 {
+                if GetForegroundWindow() == self.hwnd && IsWindowVisible(self.hwnd) != 0 {
                     ShowWindow(self.hwnd, SW_HIDE);
                 } else {
                     self.show();
@@ -1285,6 +1400,12 @@ unsafe fn register_hotkey(hwnd: HWND, hotkey: Hotkey) -> bool {
 }
 
 unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, w: usize, l: isize) -> isize {
+    if msg == WM_DPICHANGED && MAIN_WINDOW.with(|window| window.get()) == hwnd {
+        // Moving a window synchronously sends this while App may be borrowed.
+        // Queue the font/layout update rather than losing it to default handling.
+        PostMessageW(hwnd, APPLY_LAUNCHER_DPI, w & 0xffff, 0);
+        return 0;
+    }
     // Fixed-layout Settings can be larger than a small CI desktop while testing
     // high DPI. Process this even during synchronous SetWindowPos callbacks,
     // when App is already borrowed; the default screen-sized cap clips controls.
@@ -1493,6 +1614,9 @@ pub fn run() -> Result<(), String> {
 }
 
 unsafe fn run_native() -> Result<(), String> {
+    windows_sys::Win32::UI::HiDpi::SetThreadDpiAwarenessContext(
+        windows_sys::Win32::UI::HiDpi::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+    );
     let _shell = ShellApartment::initialize()?;
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args.iter().any(|a| {
@@ -1530,8 +1654,10 @@ unsafe fn run_native() -> Result<(), String> {
         CloseHandle(mutex);
         let existing = FindWindowW(wide(MAIN_CLASS).as_ptr(), null());
         if !existing.is_null() {
-            ShowWindow(existing, SW_SHOWNORMAL);
-            SetForegroundWindow(existing);
+            let mut process = 0;
+            GetWindowThreadProcessId(existing, &mut process);
+            AllowSetForegroundWindow(process);
+            PostMessageW(existing, SHOW_REQUEST, 0, 0);
         }
         return Ok(());
     }

@@ -326,7 +326,10 @@ pub(super) unsafe fn draw_row(app: &App, item: &DRAWITEMSTRUCT) {
         Action::Folder(ref path) | Action::File(ref path) => {
             app.icons.as_ref().and_then(|cache| cache.get(path))
         }
-        _ => None,
+        _ => {
+            let icon = command_icons::load(app.instance, &row.action, icon_size);
+            (!icon.is_null()).then_some(icon)
+        }
     };
 
     if let Some(icon) = icon {
