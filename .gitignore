@@ -2,6 +2,7 @@
 
 # compiled output
 /generated-artifacts/
+/desktop/throw-rust/target/
 **/bin/
 **/obj/
 desktop/Flow.Launcher/Output/
