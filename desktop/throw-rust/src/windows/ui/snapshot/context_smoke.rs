@@ -31,7 +31,10 @@ unsafe fn verify_modifier_exclusions(
     let original_query = query(edit);
     let identity = APP.with(|cell| cell.borrow().as_ref().unwrap().selected_identity());
     SetFocus(edit);
-    SendMessageW(edit, EM_SETSEL, usize::MAX, -1);
+    // EM_SETSEL(-1, -1) only removes the selection; it does not move an
+    // unselected caret to the end after SetWindowText reset it to the start.
+    let end = GetWindowTextLengthW(edit) as usize;
+    SendMessageW(edit, EM_SETSEL, end, end as isize);
     with_modifiers(false, false, false, || {
         SendMessageW(edit, WM_KEYDOWN, b'K' as usize, 0);
         // SendMessage does not call TranslateMessage: deliver its printable
@@ -40,12 +43,21 @@ unsafe fn verify_modifier_exclusions(
         Ok(())
     })?;
     settle();
-    if query(edit) != format!("{original_query}k")
-        || APP.with(|cell| cell.borrow().as_ref().unwrap().context.is_some())
+    let actual_query = query(edit);
+    let panel_open = APP.with(|cell| cell.borrow().as_ref().unwrap().context.is_some());
+    if actual_query != format!("{original_query}k")
+        || panel_open
         || GetFocus() != edit
         || IsWindowVisible(hwnd) == 0
     {
-        return Err("Plain K did not remain normal search typing.".into());
+        return Err(format!(
+            "Plain K did not remain normal search typing: expected {:?}, got {:?}, \
+             panel_open={panel_open}, edit_focused={}, launcher_visible={}.",
+            format!("{original_query}k"),
+            actual_query,
+            GetFocus() == edit,
+            IsWindowVisible(hwnd) != 0,
+        ));
     }
     SetWindowTextW(edit, wide(&original_query).as_ptr());
     settle();
