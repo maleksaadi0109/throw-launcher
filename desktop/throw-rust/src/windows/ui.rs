@@ -1,6 +1,7 @@
 use super::icons::{IconCache, ICONS_READY};
 use super::platform::*;
 mod actions;
+mod settings;
 mod snapshot;
 mod visuals;
 use std::{
@@ -65,6 +66,7 @@ struct IndexResult {
 struct App {
     hwnd: HWND,
     settings_hwnd: HWND,
+    center: settings::Center,
     edit: HWND,
     list: HWND,
     status: HWND,
@@ -595,6 +597,7 @@ impl App {
                             message(self.hwnd, &error, true);
                         } else {
                             self.settings = next;
+                            self.sync_settings_appearance();
                             self.rebuild_brushes();
                             RedrawWindow(
                                 self.hwnd,
@@ -666,279 +669,60 @@ impl App {
     }
 
     unsafe fn show_settings(&mut self) {
-        if !self.settings_hwnd.is_null() {
-            ShowWindow(self.settings_hwnd, SW_SHOWNORMAL);
-            SetForegroundWindow(self.settings_hwnd);
-            return;
+        if let Err(error) = self.open_control_center() {
+            self.close_control_center();
+            message(self.hwnd, &error, true);
         }
-        self.settings_hwnd = CreateWindowExW(
-            WS_EX_CONTROLPARENT,
-            wide(SETTINGS_CLASS).as_ptr(),
-            wide("Throw • Control Center").as_ptr(),
-            WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
-            CW_USEDEFAULT,
-            CW_USEDEFAULT,
-            self.px(660),
-            self.px(710),
-            self.hwnd,
-            null_mut(),
-            self.instance,
-            null(),
-        );
-        let parent = self.settings_hwnd;
-        if parent.is_null() {
-            message(self.hwnd, "Cannot open Control Center.", true);
-            return;
-        }
-        SendMessageW(parent, WM_SETICON, ICON_BIG as usize, self.icon as isize);
-        self.control(
-            parent,
-            "STATIC",
-            "THROW / CONTROL CENTER",
-            390,
-            0,
-            [24, 24, 600, 28],
-        );
-        self.control(
-            parent,
-            "STATIC",
-            "Native Rust. No web runtime. No background monitoring.",
-            391,
-            0,
-            [24, 57, 600, 25],
-        );
-        let startup = match startup_enabled() {
-            Ok(enabled) => enabled,
-            Err(error) => {
-                message(parent, &error, true);
-                DestroyWindow(parent);
-                self.settings_hwnd = null_mut();
-                return;
-            }
-        };
-        for (id, label, checked, y) in [
-            (
-                LITE,
-                "Lite — up to 5,000 apps and 10,000 folders; bounded scans",
-                self.settings.lite,
-                101,
-            ),
-            (
-                HIDE_START,
-                "Start with the launcher hidden",
-                self.settings.hide_on_startup,
-                135,
-            ),
-            (
-                HIDE_FOCUS,
-                "Hide the launcher when it loses focus",
-                self.settings.hide_on_focus_loss,
-                169,
-            ),
-            (
-                CALCULATOR,
-                "Calculator (= 12 * 3)",
-                self.settings.calculator,
-                203,
-            ),
-            (
-                WEB,
-                "Web search (? search terms)",
-                self.settings.web_search,
-                237,
-            ),
-            (
-                HISTORY,
-                "Remember launch frequency locally (maximum 100 apps)",
-                self.settings.remember_history,
-                271,
-            ),
-            (STARTUP, "Launch at Windows sign-in", startup, 305),
-        ] {
-            let control = self.control(
-                parent,
-                "BUTTON",
-                label,
-                id,
-                WS_TABSTOP | BS_AUTOCHECKBOX as u32,
-                [24, y, 600, 28],
-            );
-            SendMessageW(
-                control,
-                BM_SETCHECK,
-                if checked {
-                    BST_CHECKED as usize
-                } else {
-                    BST_UNCHECKED as usize
-                },
-                0,
-            );
-        }
-        for (id, label, x, width) in [
-            (HOTKEY, "Shortcut", 24, 220),
-            (THEME, "Appearance", 268, 150),
-            (LIMIT, "Result limit", 442, 150),
-        ] {
-            self.control(parent, "STATIC", label, id + 20, 0, [x, 351, width, 24]);
-            self.control(
-                parent,
-                "COMBOBOX",
-                "",
-                id,
-                WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST as u32,
-                [x, 380, width, 150],
-            );
-        }
-        for (id, values, selected) in [
-            (
-                HOTKEY,
-                vec!["Ctrl + Alt + Space", "Alt + Space", "Ctrl + Shift + Space"],
-                self.settings.hotkey as usize,
-            ),
-            (
-                THEME,
-                vec!["Graphite", "Pearl"],
-                self.settings.theme as usize,
-            ),
-            (
-                LIMIT,
-                vec!["25 — scroll", "50 — scroll", "100 — scroll"],
-                if self.settings.max_results <= 25 {
-                    0
-                } else if self.settings.max_results <= 50 {
-                    1
-                } else {
-                    2
-                },
-            ),
-        ] {
-            let control = GetDlgItem(parent, id as i32);
-            for value in values {
-                SendMessageW(control, CB_ADDSTRING, 0, wide(value).as_ptr() as isize);
-            }
-            SendMessageW(control, CB_SETCURSEL, selected, 0);
-        }
-        let note = self.control(
-            parent,
-            "STATIC",
-            "Always 3 visible rows — scroll for more results.",
-            393,
-            0,
-            [24, 414, 580, 20],
-        );
-        SendMessageW(note, WM_SETFONT, self.small_font as usize, 1);
-        self.control(
-            parent,
-            "BUTTON",
-            "Import preferences",
-            IMPORT,
-            WS_TABSTOP,
-            [24, 438, 180, 32],
-        );
-        self.control(
-            parent,
-            "BUTTON",
-            "Clear launch history",
-            CLEAR,
-            WS_TABSTOP,
-            [218, 438, 180, 32],
-        );
-        self.control(
-            parent,
-            "BUTTON",
-            "Open profile",
-            FOLDER,
-            WS_TABSTOP,
-            [412, 438, 180, 32],
-        );
-        self.control(
-            parent,
-            "BUTTON",
-            "Measure memory now",
-            MEMORY,
-            WS_TABSTOP,
-            [24, 488, 205, 32],
-        );
-        self.memory_label = self.control(
-            parent,
-            "STATIC",
-            "Measured only on request; 50 MB is not guaranteed.",
-            392,
-            0,
-            [24, 532, 600, 44],
-        );
-        SendMessageW(self.memory_label, WM_SETFONT, self.small_font as usize, 1);
-        self.control(
-            parent,
-            "STATIC",
-            "Rust edition 0.1 • .NET plugins are not loaded. Existing profiles stay untouched.",
-            393,
-            0,
-            [24, 584, 600, 40],
-        );
-        self.control(
-            parent,
-            "BUTTON",
-            "Save changes",
-            SAVE,
-            WS_TABSTOP | BS_DEFPUSHBUTTON as u32,
-            [412, 626, 180, 34],
-        );
-        ShowWindow(parent, SW_SHOW);
-        SetForegroundWindow(parent);
     }
 
     unsafe fn save_settings(&mut self) -> Result<(), String> {
         let parent = self.settings_hwnd;
         let checked =
             |id| SendMessageW(GetDlgItem(parent, id), BM_GETCHECK, 0, 0) == BST_CHECKED as isize;
-        let mut next = self.settings.clone();
-        next.lite = checked(LITE as i32);
-        next.hide_on_startup = checked(HIDE_START as i32);
-        next.hide_on_focus_loss = checked(HIDE_FOCUS as i32);
-        next.calculator = checked(CALCULATOR as i32);
-        next.web_search = checked(WEB as i32);
-        next.remember_history = checked(HISTORY as i32);
+        let mut next = self.settings_draft()?;
         if !next.remember_history {
             next.history.clear();
         }
-        next.hotkey = match SendMessageW(GetDlgItem(parent, HOTKEY as i32), CB_GETCURSEL, 0, 0) {
-            0 => Hotkey::CtrlAltSpace,
-            1 => Hotkey::AltSpace,
-            2 => Hotkey::CtrlShiftSpace,
-            _ => return Err("Select a shortcut.".into()),
-        };
-        next.theme = match SendMessageW(GetDlgItem(parent, THEME as i32), CB_GETCURSEL, 0, 0) {
-            0 => Theme::Ink,
-            1 => Theme::Light,
-            _ => return Err("Select an appearance.".into()),
-        };
-        let selected = SendMessageW(GetDlgItem(parent, LIMIT as i32), CB_GETCURSEL, 0, 0);
-        if !(0..=2).contains(&selected) {
-            return Err("Select a result limit.".into());
-        }
-        next.max_results = [25, 50, 100][selected as usize];
         next.validate()?;
         let old = self.settings.clone();
         let old_startup = startup_enabled()?;
         let new_startup = checked(STARTUP as i32);
+        let startup_changed = new_startup != old_startup;
         if next.hotkey != old.hotkey {
             UnregisterHotKey(self.hwnd, HOTKEY_ID);
             if !register_hotkey(self.hwnd, next.hotkey) {
-                register_hotkey(self.hwnd, old.hotkey);
-                return Err("This shortcut is in use by another app. Choose another one.".into());
+                let restored = register_hotkey(self.hwnd, old.hotkey);
+                return Err(format!(
+                    "This shortcut is in use by another app. Choose another one.{}",
+                    if restored {
+                        ""
+                    } else {
+                        "\nThe previous shortcut could not be restored. Open Throw from the tray and choose a free shortcut."
+                    }
+                ));
             }
         }
-        if let Err(error) = set_startup(new_startup, self.portable)
-            .and_then(|_| next.save(&self.root.join("settings.json")))
+        if let Err(error) = (if startup_changed {
+            set_startup(new_startup, self.portable)
+        } else {
+            Ok(())
+        })
+        .and_then(|_| next.save(&self.root.join("settings.json")))
         {
-            let rollback = set_startup(old_startup, self.portable);
+            let rollback = if startup_changed {
+                set_startup(old_startup, self.portable)
+            } else {
+                Ok(())
+            };
+            let mut hotkey_error = "";
             if next.hotkey != old.hotkey {
                 UnregisterHotKey(self.hwnd, HOTKEY_ID);
-                register_hotkey(self.hwnd, old.hotkey);
+                if !register_hotkey(self.hwnd, old.hotkey) {
+                    hotkey_error = "\nThe previous shortcut could not be restored. Open Throw from the tray and choose a free shortcut.";
+                }
             }
             return Err(format!(
-                "{error}{}",
+                "{error}{}{hotkey_error}",
                 rollback
                     .err()
                     .map(|e| format!("\nStartup rollback also failed: {e}"))
@@ -946,7 +730,9 @@ impl App {
             ));
         }
         self.settings = next;
+        self.center.startup = new_startup;
         self.rebuild_brushes();
+        self.apply_settings_theme();
         // Geometry remains bounded even when more results are requested.
         self.entries.truncate(self.limit());
         self.folders.truncate(if self.settings.lite {
@@ -956,8 +742,7 @@ impl App {
         });
         self.refresh();
         let lite_changed = old.lite != self.settings.lite;
-        DestroyWindow(self.settings_hwnd);
-        self.settings_hwnd = null_mut();
+        self.settings_notice("Changes saved.", false);
         InvalidateRect(self.hwnd, null(), 1);
         if lite_changed {
             self.reindex();
@@ -966,18 +751,25 @@ impl App {
     }
 
     unsafe fn import(&mut self) -> Result<(), String> {
+        if !self.confirm_discard_settings() {
+            return Ok(());
+        }
         self.popup = true;
         let picked = pick_import(self.settings_hwnd);
         self.popup = false;
         let Some(path) = picked? else {
             return Ok(());
         };
+        self.import_settings_file(&path)
+    }
+
+    unsafe fn import_settings_file(&mut self, path: &std::path::Path) -> Result<(), String> {
         let bytes = read_bounded(&path, 1024 * 1024).map_err(|e| e.to_string())?;
         let mut next = self.settings.clone();
         import_preferences(&bytes, &mut next)?;
         if MessageBoxW(self.settings_hwnd,
             wide("Copy only hide-on-startup and hide-on-focus-loss preferences?\n\nLite will remain enabled. Your current Rust settings will be backed up. No plugins, commands, hotkeys or paths will be imported. The source file stays untouched.").as_ptr(),
-            wide("Import preferences").as_ptr(), MB_YESNO | MB_ICONQUESTION) != IDYES {
+            wide("Import preferences").as_ptr(), MB_YESNO | MB_DEFBUTTON2 | MB_ICONQUESTION) != IDYES {
             return Ok(());
         }
         let destination = self.root.join("settings.json");
@@ -1001,9 +793,12 @@ impl App {
         }
         next.save(&destination)?;
         self.settings = next;
-        DestroyWindow(self.settings_hwnd);
-        self.settings_hwnd = null_mut();
+        self.close_control_center();
         self.show_settings();
+        self.settings_notice(
+            "Preferences imported. Previous settings backed up if present.",
+            false,
+        );
         self.entries.truncate(self.limit());
         self.refresh();
         self.reindex();
@@ -1087,11 +882,33 @@ impl App {
                 Some(0)
             }
             WM_PAINT => {
-                self.paint(hwnd);
+                if hwnd == self.settings_hwnd {
+                    self.paint_control_center();
+                } else {
+                    self.paint(hwnd);
+                }
                 Some(0)
             }
+            WM_PRINTCLIENT if hwnd == self.settings_hwnd => {
+                self.paint_control_center_dc(w as HDC);
+                Some(0)
+            }
+            WM_DPICHANGED if hwnd == self.settings_hwnd => {
+                self.settings_dpi_changed((w & 0xffff) as u32, &*(l as *const RECT));
+                Some(0)
+            }
+            WM_DRAWITEM if w == settings::NAV => {
+                self.draw_settings_navigation(&*(l as *const DRAWITEMSTRUCT));
+                Some(1)
+            }
             WM_ERASEBKGND => Some(1),
+            DM_GETDEFID if hwnd == self.settings_hwnd => {
+                Some(((DC_HASDEFID as usize) << 16 | SAVE) as isize)
+            }
             WM_CTLCOLORSTATIC | WM_CTLCOLORBTN | WM_CTLCOLORLISTBOX | WM_CTLCOLOREDIT => {
+                if hwnd == self.settings_hwnd {
+                    return Some(self.settings_control_color(w as HDC, l as HWND));
+                }
                 let dc = w as HDC;
                 SetTextColor(dc, self.text_color());
                 SetBkMode(dc, TRANSPARENT as i32);
@@ -1129,16 +946,34 @@ impl App {
                 let id = w & 0xffff;
                 let event = (w >> 16) as u32;
                 match id {
+                    settings::NAV if event == LBN_SELCHANGE => {
+                        let page = SendMessageW(
+                            GetDlgItem(hwnd, settings::NAV as i32),
+                            LB_GETCURSEL,
+                            0,
+                            0,
+                        );
+                        if page >= 0 {
+                            self.select_settings_section(page as usize);
+                        }
+                    }
+                    settings::CANCEL | 2 if hwnd == self.settings_hwnd => {
+                        if self.confirm_discard_settings() {
+                            self.close_control_center();
+                        }
+                    }
                     SEARCH if event == EN_CHANGE => self.refresh(),
                     RESULTS if event == LBN_DBLCLK => self.activate(),
                     SETTINGS_BUTTON => self.show_settings(),
                     SAVE => {
                         if let Err(e) = self.save_settings() {
+                            self.settings_notice(&e, true);
                             message(self.settings_hwnd, &e, true);
                         }
                     }
                     IMPORT => {
                         if let Err(e) = self.import() {
+                            self.settings_notice(&e, true);
                             message(self.settings_hwnd, &e, true);
                         }
                     }
@@ -1146,7 +981,10 @@ impl App {
                         Ok(report) => {
                             SetWindowTextW(self.memory_label, wide(report).as_ptr());
                         }
-                        Err(e) => message(self.settings_hwnd, &e, true),
+                        Err(e) => {
+                            self.settings_notice(&e, true);
+                            message(self.settings_hwnd, &e, true);
+                        }
                     },
                     FOLDER => {
                         if let Err(e) = open(self.settings_hwnd, self.root.as_os_str()) {
@@ -1171,6 +1009,15 @@ impl App {
                                 }
                                 Err(e) => message(self.settings_hwnd, &e, true),
                             }
+                        }
+                    }
+                    _ if hwnd == self.settings_hwnd
+                        && (event == BN_CLICKED || event == CBN_SELCHANGE) =>
+                    {
+                        if self.settings_dirty() {
+                            self.settings_notice("Unsaved changes", false);
+                        } else {
+                            self.settings_notice("No unsaved changes", false);
                         }
                     }
                     _ => (),
@@ -1209,8 +1056,9 @@ impl App {
             }
             WM_CLOSE => {
                 if hwnd == self.settings_hwnd {
-                    DestroyWindow(hwnd);
-                    self.settings_hwnd = null_mut();
+                    if self.confirm_discard_settings() {
+                        self.close_control_center();
+                    }
                 } else {
                     ShowWindow(hwnd, SW_HIDE);
                 }
@@ -1241,6 +1089,14 @@ unsafe fn register_hotkey(hwnd: HWND, hotkey: Hotkey) -> bool {
 }
 
 unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, w: usize, l: isize) -> isize {
+    // Fixed-layout Settings can be larger than a small CI desktop while testing
+    // high DPI. Process this even during synchronous SetWindowPos callbacks,
+    // when App is already borrowed; the default screen-sized cap clips controls.
+    if msg == WM_GETMINMAXINFO && MAIN_WINDOW.with(|window| window.get()) != hwnd {
+        let info = &mut *(l as *mut MINMAXINFO);
+        info.ptMaxTrackSize = POINT { x: 8192, y: 8192 };
+        return 0;
+    }
     // Destruction can be synchronous inside an App callback. It must run even
     // when the callback owns the state borrow, or Quit would leave a hidden process.
     if msg == WM_DESTROY && MAIN_WINDOW.with(|window| window.get()) == hwnd {
@@ -1493,6 +1349,7 @@ unsafe fn run_native() -> Result<(), String> {
     let mut app = App {
         hwnd: null_mut(),
         settings_hwnd: null_mut(),
+        center: settings::Center::default(),
         edit: null_mut(),
         list: null_mut(),
         status: null_mut(),
@@ -1587,7 +1444,7 @@ unsafe fn run_native() -> Result<(), String> {
                 return Err("Windows settings roundtrip failed.".into());
             }
             std::fs::write(root.join("smoke-result.txt"), report).map_err(|e| e.to_string())?;
-            DestroyWindow(app.settings_hwnd); app.settings_hwnd = null_mut();
+            app.close_control_center();
             // Real Shell icons, but no applications are executed by the test.
             let windows = PathBuf::from(std::env::var_os("SystemRoot").ok_or("SystemRoot is missing")?);
             app.entries = [
@@ -1661,8 +1518,8 @@ unsafe fn run_native() -> Result<(), String> {
                     .map(|app| app.settings_hwnd)
                     .unwrap_or(null_mut())
             });
-            let handled =
-                !settings_window.is_null() && IsDialogMessageW(settings_window, &msg) != 0;
+            let handled = !settings_window.is_null()
+                && (settings::translate_key(&msg) || IsDialogMessageW(settings_window, &msg) != 0);
             if !handled {
                 TranslateMessage(&msg);
                 DispatchMessageW(&msg);
@@ -1673,6 +1530,7 @@ unsafe fn run_native() -> Result<(), String> {
     }
     APP.with(|cell| {
         if let Some(app) = cell.borrow_mut().take() {
+            app.center.delete_fonts();
             for object in [
                 app.font,
                 app.small_font,
