@@ -12,7 +12,9 @@ Extract the ZIP into a new folder and run **Throw.Rust.exe**.
 Windows may show a warning for this unsigned development executable.
 
 - **Ctrl + Alt + Space** opens/hides the launcher (change it in Settings).
-- Type an application name. Use Up/Down and Enter, or double-click.
+- Type an application or file name. Use Up/Down and Enter, or double-click.
+- `file: budget` searches only files; ordinary queries show apps and files.
+  Files need at least two characters and match a literal filename substring.
 - `= (12 + 3) * 2` calculates; Enter copies the answer.
 - `? search terms` opens DuckDuckGo in the default browser.
 - An explicit `https://…` or `http://…` URL opens in the default browser.
@@ -49,11 +51,43 @@ is `ThrowRustData` next to the executable. Always use the same flag for this
 profile. Neither edition reads/writes Flow's or the C# edition's profile.
 `--background` suppresses the initial window (used by Windows startup).
 
+## File search: Windows Search
+
+File search uses **Windows Search's existing disk-backed SystemIndex**, accessed
+directly through native ADO COM and `Search.CollatorDSO`. It does not start
+PowerShell, load .NET, create a second full-drive catalog, or scan your drives.
+The Windows Search service owns indexing and its separate resource usage.
+The Rust app keeps only 24 file candidates per query; apps remain limited to
+5,000/20,000 entries and the combined list remains limited to 4–12 results.
+When files match, up to half the list is reserved for app matches; `file:` uses
+the entire list for files. File rows show their full path below the filename.
+
+Only files in Windows-indexed locations can appear. Adjust **Windows Settings →
+Searching Windows / Indexing Options** to include folders; newly created, moved,
+or deleted files may lag until Windows refreshes its catalog. Network/UNC and
+device paths are not supported. There is no fallback drive crawl. Windows Search
+disabled/unavailable, provider failures and unsupported wildcard characters
+(`%`, `_`, `[` and `]`) produce a status message while app search keeps working.
+The app does not change Windows indexing settings during normal use.
+
+Queries are debounced by 150 ms and run on a single background worker with a
+two-second provider connection/command timeout. Results from an old query are
+discarded, rather than replacing current results. The provider controls actual
+cancellation timing; if it stalls, app search and the window remain responsive
+without creating more worker threads. Special calculator/web/command/URL queries
+and empty/one-character queries do not contact the file provider.
+
+Enter opens only a selected, validated, existing local file through its Windows
+association, with no command-line arguments. Missing/inaccessible files and
+association failures are reported. Files, including executable files and scripts,
+can run their registered action when explicitly selected: open only files you
+trust. Typed text is never passed to a shell or executed as a command.
+
 ## What is not ported
 
 This is a working foundation, **not full Flow feature parity**. Existing .NET,
 Python and JavaScript plugins cannot be loaded. Plugin marketplace, Everything
-file search, UWP-only app discovery, arbitrary shell commands, custom themes,
+integration, UWP-only app discovery, arbitrary shell commands, custom themes,
 extension APIs, rich icon previews, multilingual UI, automatic updating and a
 signed installer are not implemented. Shortcuts to packaged applications in the
 Start menu can still work.
@@ -98,8 +132,26 @@ The Windows workflow compiles the actual UI and runs `--smoke-test` before
 packaging. This flag creates/deletes its own temporary profile; it never changes
 normal settings, startup registration, clipboard, or launches another app.
 
+The workflow also enables Windows Search on its disposable runner and runs
+`--file-search-benchmark`. This opt-in mode creates 1,001 temporary files, adds
+only their temporary folder to Windows Search, waits for indexing, checks
+apostrophe/Unicode search, and measures 30 bounded mixed searches with each
+5,000/20,000-app index. It removes its indexing rule and temporary files afterward.
+Do not use this flag as a normal launch option: it deliberately modifies the
+Windows indexing scope temporarily for measurement.
+`CI-file-search-benchmark.txt` records first/median/p95/max query latency
+(including COM overhead, excluding debounce) and working set/private committed
+memory before/after each workload. Windows Search service memory is excluded,
+so this is not a total system-cost or representative desktop idle benchmark.
+The run fails rather than reporting invented timings when Search is unavailable
+or fixtures do not index. Run this locally on Windows with
+`./target/release/throw-rust.exe --file-search-benchmark`; the report is written
+beside the executable. Errors are written to `smoke-error.txt` in the working
+directory. Indexing/benchmark failures also have a separate CI evidence artifact.
+
 Architecture: `config` validates/persists settings, `index` scans bounded app
-folders, `search` ranks top-k results and constructs allowlisted actions,
+folders, `search` ranks top-k results and constructs allowlisted actions, `files`
+defines bounded file-query/merge policy,
 `calculator` parses arithmetic without evaluation, and `windows` owns native UI
 and OS calls. Win32 calls are kept out of the portable search engine.
 

@@ -8,6 +8,7 @@ use std::{
 };
 use throw_launcher::{
     config::{import_preferences, read_bounded, Hotkey, Settings, Theme},
+    files::{self, FileEntry},
     index::{self, Entry, Scan, LITE_INDEX_LIMIT, STANDARD_INDEX_LIMIT},
     search::{self, Action, ResultRow},
 };
@@ -23,6 +24,8 @@ const SETTINGS_CLASS: &str = "ThrowRustSettingsWindow";
 const HOTKEY_ID: i32 = 41;
 const TRAY: u32 = WM_APP + 1;
 const INDEX_READY: u32 = WM_APP + 2;
+const FILES_READY: u32 = WM_APP + 3;
+const FILE_TIMER: usize = 42;
 const SEARCH: usize = 101;
 const RESULTS: usize = 102;
 const SETTINGS_BUTTON: usize = 103;
@@ -72,6 +75,11 @@ struct App {
     entries: Vec<Entry>,
     rows: Vec<ResultRow>,
     worker: Option<Receiver<Result<Scan, String>>>,
+    file_worker: Option<Receiver<(String, Result<Vec<FileEntry>, String>)>>,
+    file_query: String,
+    file_entries: Vec<FileEntry>,
+    file_error: Option<String>,
+    file_pending: bool,
     reindex_again: bool,
     portable: bool,
     popup: bool,
@@ -220,7 +228,27 @@ impl App {
         let mut text = [0u16; 513];
         let count = GetWindowTextW(self.edit, text.as_mut_ptr(), text.len() as i32);
         let text = String::from_utf16_lossy(&text[..count.max(0) as usize]);
+        let terms = files::terms(&text).unwrap_or("").to_string();
+        if terms != self.file_query {
+            self.file_query = terms;
+            self.file_entries.clear();
+            self.file_error = None;
+            self.file_pending = !self.file_query.is_empty();
+            KillTimer(self.hwnd, FILE_TIMER);
+            if self.file_pending {
+                if SetTimer(self.hwnd, FILE_TIMER, 150, None) == 0 {
+                    self.file_pending = false;
+                    self.file_error = Some("Cannot schedule file search. Try typing again.".into());
+                }
+            }
+        }
         self.rows = search::query(&text, &self.entries, &self.settings);
+        files::merge(
+            &mut self.rows,
+            &self.file_entries,
+            self.settings.max_results,
+            text.trim().starts_with("file:"),
+        );
         SendMessageW(self.list, LB_RESETCONTENT, 0, 0);
         for row in &self.rows {
             SendMessageW(
@@ -233,9 +261,13 @@ impl App {
         if !self.rows.is_empty() {
             SendMessageW(self.list, LB_SETCURSEL, 0, 0);
         }
-        if self.worker.is_none() {
+        if let Some(error) = &self.file_error {
+            self.set_status(error);
+        } else if self.file_pending {
+            self.set_status("Searching indexed files… Apps can be opened now.");
+        } else if self.worker.is_none() {
             self.set_status(&if self.rows.is_empty() && !text.trim().is_empty() {
-                "No matches. Try ? web search, = calculator, or > commands.".into()
+                "No matches. Files require 2+ characters and a Windows-indexed folder.".into()
             } else {
                 format!(
                     "{} apps  •  {}  •  Enter to open  •  Esc to hide",
@@ -249,6 +281,50 @@ impl App {
             });
         }
         InvalidateRect(self.list, null(), 0);
+    }
+
+    unsafe fn start_file_search(&mut self) {
+        KillTimer(self.hwnd, FILE_TIMER);
+        // Single flight: typing cannot create a thread or queued request per key.
+        // The completion handler schedules only the latest desired query.
+        if self.file_worker.is_some() || !self.file_pending || self.file_query.is_empty() {
+            return;
+        }
+        let query = self.file_query.clone();
+        let hwnd = self.hwnd as usize;
+        let (sender, receiver) = mpsc::sync_channel(1);
+        self.file_worker = Some(receiver);
+        std::thread::spawn(move || {
+            let result =
+                std::panic::catch_unwind(|| super::files::search(&query)).unwrap_or_else(|_| {
+                    Err("File search failed unexpectedly. Apps still work.".into())
+                });
+            if sender.send((query, result)).is_ok() {
+                PostMessageW(hwnd as HWND, FILES_READY, 0, 0);
+            }
+        });
+    }
+
+    unsafe fn files_ready(&mut self) {
+        let completed = self.file_worker.take().and_then(|r| r.try_recv().ok());
+        if let Some((query, result)) = completed {
+            if query == self.file_query {
+                self.file_pending = false;
+                match result {
+                    Ok(entries) => self.file_entries = entries,
+                    Err(error) => self.file_error = Some(error),
+                }
+                self.refresh();
+            } else {
+                self.start_file_search();
+            }
+        } else {
+            self.file_pending = false;
+            self.file_error = Some(
+                "File search worker did not return results. Type a new query to retry.".into(),
+            );
+            self.refresh();
+        }
     }
 
     unsafe fn show(&self) {
@@ -339,6 +415,14 @@ impl App {
             return;
         };
         let result = match row.action {
+            Action::File(path) => {
+                let entry = FileEntry { path };
+                if !entry.valid() || !entry.path.is_file() {
+                    Err("This file was moved, deleted, or cannot be accessed. Search again or check its folder permissions.".into())
+                } else {
+                    open(self.hwnd, entry.path.as_os_str())
+                }
+            }
             Action::App(i) => {
                 if let Some(entry) = self.entries.get(i) {
                     if !entry.valid() || !entry.path.is_file() {
@@ -931,6 +1015,14 @@ impl App {
                 self.index_ready();
                 Some(0)
             }
+            FILES_READY => {
+                self.files_ready();
+                Some(0)
+            }
+            WM_TIMER if w == FILE_TIMER => {
+                self.start_file_search();
+                Some(0)
+            }
             TRAY => {
                 match l as u32 {
                     WM_LBUTTONUP | WM_LBUTTONDBLCLK => self.show(),
@@ -1092,7 +1184,8 @@ unsafe fn run_native() -> Result<(), String> {
     {
         return Err("Supported options: --portable, --background, --smoke-test".into());
     }
-    let smoke = args.iter().any(|a| a == "--smoke-test");
+    let benchmark = args.iter().any(|a| a == "--file-search-benchmark");
+    let smoke = benchmark || args.iter().any(|a| a == "--smoke-test");
     let portable = args.iter().any(|a| a == "--portable");
     // An independent singleton; the WPF and Flow applications are untouched.
     let mutex = CreateMutexW(
@@ -1188,6 +1281,11 @@ unsafe fn run_native() -> Result<(), String> {
         entries: vec![],
         rows: vec![],
         worker: None,
+        file_worker: None,
+        file_query: String::new(),
+        file_entries: vec![],
+        file_error: None,
+        file_pending: false,
         reindex_again: false,
         portable,
         popup: false,
@@ -1232,7 +1330,11 @@ unsafe fn run_native() -> Result<(), String> {
                 SendMessageW(app.list, LB_GETCOUNT, 0, 0) != 1 {
                 return Err("Native calculator/search list smoke test failed.".into());
             }
-            let report = memory_report()?;
+            let report = if benchmark {
+                super::benchmark::run(&root)?
+            } else {
+                memory_report()?
+            };
             app.show_settings();
             if app.settings_hwnd.is_null() || GetDlgItem(app.settings_hwnd, SAVE as i32).is_null() {
                 return Err("Native settings smoke test failed.".into());
@@ -1272,7 +1374,11 @@ unsafe fn run_native() -> Result<(), String> {
                 .map_err(|e| e.to_string())?
                 .parent()
                 .ok_or("Missing executable folder")?
-                .join("smoke-result.txt");
+                .join(if benchmark {
+                    "file-search-benchmark.txt"
+                } else {
+                    "smoke-result.txt"
+                });
             std::fs::copy(root.join("smoke-result.txt"), output).map_err(|e| e.to_string())?;
         }
         let _ = std::fs::remove_dir_all(&root);

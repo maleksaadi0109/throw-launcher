@@ -1,3 +1,5 @@
+mod benchmark;
+mod files;
 mod platform;
 mod ui;
 

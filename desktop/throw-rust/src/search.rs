@@ -5,6 +5,7 @@ pub const MAX_QUERY: usize = 512;
 #[derive(Clone, Debug)]
 pub enum Action {
     App(usize),
+    File(std::path::PathBuf),
     Url(String),
     Copy(String),
     Settings,
@@ -25,6 +26,9 @@ pub fn query(input: &str, entries: &[Entry], settings: &Settings) -> Vec<ResultR
         return vec![];
     }
     let mut rows = Vec::new();
+    if input.starts_with("file:") {
+        return rows;
+    }
     if input.starts_with('>') {
         let filter = input.trim_start_matches('>').trim().to_lowercase();
         for (title, detail, action) in [
