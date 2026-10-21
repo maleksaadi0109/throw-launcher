@@ -184,6 +184,14 @@ pub unsafe fn open(hwnd: HWND, target: &OsStr) -> Result<(), String> {
     }
 }
 
+pub fn validate_file(path: &Path) -> Result<(), String> {
+    let entry = throw_launcher::files::FileEntry { path: path.into() };
+    if !entry.valid() || !path.is_file() {
+        Err("This file was moved, deleted, or cannot be accessed. Search again or check its folder permissions.".into())
+    } else {
+        Ok(())
+    }
+}
 pub unsafe fn copy_text(hwnd: HWND, value: &str) -> Result<(), String> {
     let text = wide(value);
     let memory = GlobalAlloc(GMEM_MOVEABLE, text.len() * 2);

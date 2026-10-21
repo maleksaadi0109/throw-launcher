@@ -374,6 +374,15 @@ impl App {
             .unwrap();
         self.settings_combo(2, LIMIT, "Scrollable result limit", &values, selected, 270)?;
         self.settings_note(2, "App and folder search use the existing local index. Folder selection is not available in this edition yet.", 370, 48)?;
+        self.settings_control(
+            "BUTTON",
+            "Bookmarks & web providers",
+            WEB_MANAGER,
+            WS_TABSTOP,
+            2,
+            [224, 418, 420, 28],
+            0,
+        )?;
 
         self.settings_combo(
             3,

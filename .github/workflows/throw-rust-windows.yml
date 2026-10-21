@@ -54,6 +54,26 @@ jobs:
               $bmp.Save("$PWD/../../generated-artifacts/throw-rust/screenshots/$($capture.BaseName).png", [System.Drawing.Imaging.ImageFormat]::Png)
             } finally { $bmp.Dispose() }
           }
+      - name: Enable Windows Search on the disposable runner
+        run: |
+          if (-not (Get-Service WSearch -ErrorAction SilentlyContinue)) {
+            Install-WindowsFeature Search-Service -ErrorAction Stop
+          }
+          Set-Service WSearch -StartupType Automatic
+          Start-Service WSearch
+      - name: Measure bounded app and file search on Windows
+        run: |
+          $process = Start-Process -FilePath ./target/release/throw-rust.exe -ArgumentList "--file-search-benchmark" -PassThru
+          if (-not $process.WaitForExit(240000)) {
+            $process.Kill()
+            throw "Windows file search benchmark timed out"
+          }
+          if ($process.ExitCode -ne 0) {
+            if (Test-Path smoke-error.txt) { Get-Content smoke-error.txt }
+            throw "Windows file search benchmark failed: $($process.ExitCode)"
+          }
+          if (-not (Test-Path ./target/release/file-search-benchmark.txt)) { throw "No file search evidence produced" }
+          Get-Content ./target/release/file-search-benchmark.txt
       - name: Package Rust preview
         run: |
           $out = "../../generated-artifacts/throw-rust"
@@ -63,6 +83,7 @@ jobs:
           Copy-Item README.md "$out/package/README.md"
           Copy-Item ../../LICENSE "$out/package/LICENSE.txt"
           Copy-Item ./target/release/smoke-result.txt "$out/package/CI-memory-sample.txt"
+          Copy-Item ./target/release/file-search-benchmark.txt "$out/package/CI-file-search-benchmark.txt"
           Compress-Archive "$out/package/*" "$out/Throw-Rust-Windows-x64.zip"
           Get-Item "$out/package/Throw.Rust.exe" | Select-Object Name, Length
       - uses: actions/upload-artifact@v4
@@ -75,3 +96,11 @@ jobs:
           name: throw-rust-design-screenshots
           path: generated-artifacts/throw-rust/screenshots/*.png
           if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: throw-rust-search-evidence
+          path: |
+            desktop/throw-rust/target/release/*benchmark.txt
+            desktop/throw-rust/smoke-error.txt
+          if-no-files-found: warn

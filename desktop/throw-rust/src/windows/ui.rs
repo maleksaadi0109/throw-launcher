@@ -1,18 +1,27 @@
 use super::icons::{IconCache, ICONS_READY};
 use super::platform::*;
 mod actions;
+
 mod settings;
 mod snapshot;
 mod visuals;
+mod web_settings;
+mod web_smoke;
 use std::{
     cell::{Cell, RefCell},
     mem::{size_of, zeroed},
     path::PathBuf,
     ptr::{null, null_mut},
-    sync::mpsc::{self, Receiver},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver},
+        Arc,
+    },
 };
 use throw_launcher::{
+    bookmarks::{self, Bookmark},
     config::{import_preferences, read_bounded, Hotkey, Settings, Theme},
+    files::{self, FileEntry},
     folders::{self, Folder},
     index::{self, Entry, Scan, LITE_INDEX_LIMIT, STANDARD_INDEX_LIMIT},
     search::{self, Action, ResultRow},
@@ -29,6 +38,8 @@ const SETTINGS_CLASS: &str = "ThrowRustSettingsWindow";
 const HOTKEY_ID: i32 = 41;
 const TRAY: u32 = WM_APP + 1;
 const INDEX_READY: u32 = WM_APP + 2;
+
+const FILES_READY: u32 = WM_APP + 5;
 const FIT_RESULTS: u32 = WM_APP + 4;
 const SEARCH: usize = 101;
 const RESULTS: usize = 102;
@@ -52,20 +63,24 @@ const STARTUP: usize = 316;
 const HOTKEY: usize = 320;
 const THEME: usize = 321;
 const LIMIT: usize = 322;
+const WEB_MANAGER: usize = 323;
 
 thread_local! {
     static APP: RefCell<Option<App>> = const { RefCell::new(None) };
     static MAIN_WINDOW: Cell<HWND> = const { Cell::new(null_mut()) };
+    static RESULT_WHEEL_REMAINDER: Cell<i32> = const { Cell::new(0) };
 }
 
 struct IndexResult {
     apps: Scan,
     folders: folders::Scan,
+    bookmarks: bookmarks::Scan,
 }
 
 struct App {
     hwnd: HWND,
     settings_hwnd: HWND,
+    web_hwnd: HWND,
     center: settings::Center,
     edit: HWND,
     list: HWND,
@@ -86,17 +101,28 @@ struct App {
     root: PathBuf,
     entries: Vec<Entry>,
     folders: Vec<Folder>,
+    bookmarks: Vec<Bookmark>,
+    browser_root: Option<PathBuf>,
+    bookmark_status: String,
+    bookmark_permission: Arc<AtomicBool>,
     rows: Vec<ResultRow>,
     worker: Option<Receiver<Result<IndexResult, String>>>,
     reindex_again: bool,
     portable: bool,
     popup: bool,
+    file_worker: Option<Receiver<(String, Result<Vec<FileEntry>, String>)>>,
+    file_query: String,
+    file_entries: Vec<FileEntry>,
+    file_error: Option<String>,
+    file_pending: bool,
+    shown_query: String,
 }
 
 impl App {
     fn px(&self, value: i32) -> i32 {
         (value as f64 * self.scale).round() as i32
     }
+
     fn limit(&self) -> usize {
         if self.settings.lite {
             LITE_INDEX_LIMIT
@@ -104,6 +130,7 @@ impl App {
             STANDARD_INDEX_LIMIT
         }
     }
+
     fn text_color(&self) -> u32 {
         if self.settings.theme == Theme::Ink {
             rgb(239, 241, 247)
@@ -111,6 +138,7 @@ impl App {
             rgb(28, 31, 38)
         }
     }
+
     fn muted(&self) -> u32 {
         if self.settings.theme == Theme::Ink {
             rgb(153, 159, 173)
@@ -193,7 +221,6 @@ impl App {
             "",
             RESULTS,
             WS_TABSTOP
-                | WS_VSCROLL
                 | LBS_NOTIFY as u32
                 | LBS_HASSTRINGS as u32
                 | LBS_OWNERDRAWFIXED as u32
@@ -307,7 +334,7 @@ impl App {
                         .get(i)
                         .filter(|e| e.valid())
                         .map(|e| e.path.clone()),
-                    Action::Folder(ref path) => Some(path.clone()),
+                    Action::Folder(ref path) | Action::File(ref path) => Some(path.clone()),
                     _ => None,
                 }
             }));
@@ -325,7 +352,49 @@ impl App {
         let mut text = [0u16; 513];
         let count = GetWindowTextW(self.edit, text.as_mut_ptr(), text.len() as i32);
         let text = String::from_utf16_lossy(&text[..count.max(0) as usize]);
-        self.rows = search::query_all(&text, &self.entries, &self.folders, &self.settings);
+        // Preserve the selected item when asynchronous file results arrive.
+        let keep_selection = text == self.shown_query && !self.rows.is_empty();
+        let selected = SendMessageW(self.list, LB_GETCURSEL, 0, 0);
+        let selected_path = if keep_selection && selected >= 0 {
+            self.rows
+                .get(selected as usize)
+                .map(|row| row.detail.clone())
+        } else {
+            None
+        };
+        let old_top = SendMessageW(self.list, LB_GETTOPINDEX, 0, 0).max(0);
+        self.shown_query = text.clone();
+        let terms = if self.settings.web_search
+            && throw_launcher::web::match_provider(&text, &self.settings.web_providers).is_some()
+        {
+            String::new()
+        } else {
+            files::terms(&text).unwrap_or("").to_string()
+        };
+        if terms != self.file_query {
+            self.file_query = terms;
+            self.file_entries.clear();
+            self.file_error = None;
+            self.file_pending = !self.file_query.is_empty();
+            KillTimer(self.hwnd, FILE_TIMER);
+            if self.file_pending && SetTimer(self.hwnd, FILE_TIMER, 150, None) == 0 {
+                self.file_pending = false;
+                self.file_error = Some("Cannot schedule file search. Try typing again.".into());
+            }
+        }
+        self.rows = search::query_sources(
+            &text,
+            &self.entries,
+            &self.folders,
+            &self.bookmarks,
+            &self.settings,
+        );
+        files::merge(
+            &mut self.rows,
+            &self.file_entries,
+            self.settings.max_results,
+            text.trim().starts_with("file:"),
+        );
         // EN_CHANGE is synchronous inside WM_CUT/PASTE/UNDO. Resize after that
         // native operation finishes, rather than re-entering it mid-mutation.
         PostMessageW(self.hwnd, FIT_RESULTS, 0, 0);
@@ -339,13 +408,27 @@ impl App {
             );
         }
         if !self.rows.is_empty() {
-            SendMessageW(self.list, LB_SETCURSEL, 0, 0);
-            SendMessageW(self.list, LB_SETTOPINDEX, 0, 0);
+            let selection = if keep_selection {
+                selected_path.and_then(|path| self.rows.iter().position(|row| row.detail == path))
+            } else {
+                Some(0)
+            };
+            SendMessageW(self.list, LB_SETCURSEL, selection.unwrap_or(usize::MAX), 0);
+            SendMessageW(
+                self.list,
+                LB_SETTOPINDEX,
+                if keep_selection { old_top as usize } else { 0 },
+                0,
+            );
         }
         self.request_result_icons();
-        if self.worker.is_none() {
+        if let Some(error) = &self.file_error {
+            self.set_status(error);
+        } else if self.file_pending {
+            self.set_status("Searching indexed files… Apps can be opened now.");
+        } else if self.worker.is_none() {
             self.set_status(&if self.rows.is_empty() && !text.trim().is_empty() {
-                "No matches. Try a folder name, local path, ? web, or = calculate.".into()
+                "No matches. Files need 2+ characters and an indexed folder; try a folder name or local path too.".into()
             } else {
                 format!(
                     "{} apps · {} folders · {}",
@@ -483,6 +566,9 @@ impl App {
         let cache = self.root.join("apps.json");
         let folder_cache = self.root.join("folders.json");
         let lite = self.settings.lite;
+        let bookmarks_enabled = self.settings.bookmarks;
+        let bookmark_permission = Arc::clone(&self.bookmark_permission);
+        let browser_root = self.browser_root.clone();
         let hwnd = self.hwnd as usize;
         self.worker = Some(receiver);
         std::thread::spawn(move || {
@@ -491,9 +577,24 @@ impl App {
                 save_index(&cache, &scan.entries)?;
                 let folder_scan = folders::scan(&folder_roots, lite);
                 folders::save(&folder_cache, &folder_scan.entries)?;
+                let bookmark_scan = if !bookmarks_enabled
+                    || !bookmark_permission.load(Ordering::Acquire)
+                {
+                    bookmarks::Scan::default()
+                } else if let Some(root) = browser_root {
+                    bookmarks::discover_while(&root, || bookmark_permission.load(Ordering::Acquire))
+                } else {
+                    bookmarks::Scan {
+                        errors: vec![
+                            "LOCALAPPDATA is unavailable; bookmark discovery could not run.".into(),
+                        ],
+                        ..Default::default()
+                    }
+                };
                 Ok::<_, String>(IndexResult {
                     apps: scan,
                     folders: folder_scan,
+                    bookmarks: bookmark_scan,
                 })
             })
             .unwrap_or_else(|_| Err("App/folder indexing failed unexpectedly.".into()));
@@ -525,6 +626,29 @@ impl App {
                 });
                 self.entries = result.apps.entries;
                 self.folders = result.folders.entries;
+                if self.settings.bookmarks {
+                    self.bookmark_status = format!(
+                        "{} bookmarks · {} unsafe entries skipped{}{}",
+                        result.bookmarks.entries.len(),
+                        result.bookmarks.skipped,
+                        if result.bookmarks.limited {
+                            " · scan limit reached"
+                        } else {
+                            ""
+                        },
+                        result
+                            .bookmarks
+                            .errors
+                            .first()
+                            .map(|e| format!(" · {} error(s): {e}", result.bookmarks.errors.len()))
+                            .unwrap_or_default()
+                    );
+                    self.bookmarks = result.bookmarks.entries;
+                } else {
+                    self.bookmarks.clear();
+                    self.bookmark_status = "Bookmarks off. Browser files are not read.".into();
+                }
+                self.update_bookmark_status();
                 self.refresh();
                 self.restore_selection(selected);
                 if result.apps.unreadable > 0
@@ -546,6 +670,10 @@ impl App {
                 }
             }
             Some(Err(error)) => {
+                if self.settings.bookmarks {
+                    self.bookmark_status = format!("Bookmark refresh could not finish: {error}");
+                    self.update_bookmark_status();
+                }
                 self.set_status(&error);
             }
             None => {
@@ -569,6 +697,9 @@ impl App {
             return;
         };
         let result = match row.action {
+            Action::File(path) => {
+                validate_file(&path).and_then(|_| open(self.hwnd, path.as_os_str()))
+            }
             Action::System(command) => {
                 if !super::system_actions::confirm(self.hwnd, command) {
                     self.set_status("Cancelled — no system action was performed.");
@@ -731,6 +862,9 @@ impl App {
         }
         self.settings = next;
         self.center.startup = new_startup;
+        if old.web_search != self.settings.web_search {
+            self.sync_web_search_switch();
+        }
         self.rebuild_brushes();
         self.apply_settings_theme();
         // Geometry remains bounded even when more results are requested.
@@ -761,48 +895,6 @@ impl App {
             return Ok(());
         };
         self.import_settings_file(&path)
-    }
-
-    unsafe fn import_settings_file(&mut self, path: &std::path::Path) -> Result<(), String> {
-        let bytes = read_bounded(&path, 1024 * 1024).map_err(|e| e.to_string())?;
-        let mut next = self.settings.clone();
-        import_preferences(&bytes, &mut next)?;
-        if MessageBoxW(self.settings_hwnd,
-            wide("Copy only hide-on-startup and hide-on-focus-loss preferences?\n\nLite will remain enabled. Your current Rust settings will be backed up. No plugins, commands, hotkeys or paths will be imported. The source file stays untouched.").as_ptr(),
-            wide("Import preferences").as_ptr(), MB_YESNO | MB_DEFBUTTON2 | MB_ICONQUESTION) != IDYES {
-            return Ok(());
-        }
-        let destination = self.root.join("settings.json");
-        if destination.exists() {
-            let backup = self.root.join(format!(
-                "settings-before-import-{}.json",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map_err(|e| e.to_string())?
-                    .as_nanos()
-            ));
-            let mut file = std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(backup)
-                .map_err(|e| e.to_string())?;
-            use std::io::Write;
-            file.write_all(&read_bounded(&destination, 64 * 1024).map_err(|e| e.to_string())?)
-                .map_err(|e| e.to_string())?;
-            file.sync_all().map_err(|e| e.to_string())?;
-        }
-        next.save(&destination)?;
-        self.settings = next;
-        self.close_control_center();
-        self.show_settings();
-        self.settings_notice(
-            "Preferences imported. Previous settings backed up if present.",
-            false,
-        );
-        self.entries.truncate(self.limit());
-        self.refresh();
-        self.reindex();
-        Ok(())
     }
 
     unsafe fn tray_menu(&mut self) {
@@ -946,6 +1038,12 @@ impl App {
                 let id = w & 0xffff;
                 let event = (w >> 16) as u32;
                 match id {
+                    WEB_MANAGER => self.show_web_settings(),
+                    id if web_settings::is_command(id) => {
+                        if let Err(error) = self.web_command(id, event) {
+                            message(self.web_hwnd, &error, true);
+                        }
+                    }
                     settings::NAV if event == LBN_SELCHANGE => {
                         let page = SendMessageW(
                             GetDlgItem(hwnd, settings::NAV as i32),
@@ -1036,6 +1134,14 @@ impl App {
                 self.index_ready();
                 Some(0)
             }
+            FILES_READY => {
+                self.files_ready();
+                Some(0)
+            }
+            WM_TIMER if w == FILE_TIMER => {
+                self.start_file_search();
+                Some(0)
+            }
             TRAY => {
                 match l as u32 {
                     WM_LBUTTONUP | WM_LBUTTONDBLCLK => self.show(),
@@ -1048,6 +1154,7 @@ impl App {
                 if w & 0xffff == WA_INACTIVE as usize
                     && self.settings.hide_on_focus_loss
                     && self.settings_hwnd.is_null()
+                    && self.web_hwnd.is_null()
                     && !self.popup
                 {
                     ShowWindow(hwnd, SW_HIDE);
@@ -1055,7 +1162,10 @@ impl App {
                 Some(0)
             }
             WM_CLOSE => {
-                if hwnd == self.settings_hwnd {
+                if hwnd == self.web_hwnd {
+                    DestroyWindow(hwnd);
+                    self.web_hwnd = null_mut();
+                } else if hwnd == self.settings_hwnd {
                     if self.confirm_discard_settings() {
                         self.close_control_center();
                     }
@@ -1072,6 +1182,92 @@ impl App {
             }
             _ => None,
         }
+    }
+
+    unsafe fn start_file_search(&mut self) {
+        KillTimer(self.hwnd, FILE_TIMER);
+        // Single flight: typing cannot create a thread or queued request per key.
+        // The completion handler schedules only the latest desired query.
+        if self.file_worker.is_some() || !self.file_pending || self.file_query.is_empty() {
+            return;
+        }
+        let query = self.file_query.clone();
+        let hwnd = self.hwnd as usize;
+        let (sender, receiver) = mpsc::sync_channel(1);
+        self.file_worker = Some(receiver);
+        std::thread::spawn(move || {
+            let result =
+                std::panic::catch_unwind(|| super::files::search(&query)).unwrap_or_else(|_| {
+                    Err("File search failed unexpectedly. Apps still work.".into())
+                });
+            if sender.send((query, result)).is_ok() {
+                PostMessageW(hwnd as HWND, FILES_READY, 0, 0);
+            }
+        });
+    }
+
+    unsafe fn files_ready(&mut self) {
+        let completed = self.file_worker.take().and_then(|r| r.try_recv().ok());
+        if let Some((query, result)) = completed {
+            if query == self.file_query {
+                self.file_pending = false;
+                match result {
+                    Ok(entries) => self.file_entries = entries,
+                    Err(error) => self.file_error = Some(error),
+                }
+                self.refresh();
+            } else {
+                self.start_file_search();
+            }
+        } else {
+            self.file_pending = false;
+            self.file_error = Some(
+                "File search worker did not return results. Type a new query to retry.".into(),
+            );
+            self.refresh();
+        }
+    }
+
+    unsafe fn import_settings_file(&mut self, path: &std::path::Path) -> Result<(), String> {
+        let bytes = read_bounded(&path, 1024 * 1024).map_err(|e| e.to_string())?;
+        let mut next = self.settings.clone();
+        import_preferences(&bytes, &mut next)?;
+        if MessageBoxW(self.settings_hwnd,
+            wide("Copy only hide-on-startup and hide-on-focus-loss preferences?\n\nLite will remain enabled. Your current Rust settings will be backed up. No plugins, commands, hotkeys or paths will be imported. The source file stays untouched.").as_ptr(),
+            wide("Import preferences").as_ptr(), MB_YESNO | MB_DEFBUTTON2 | MB_ICONQUESTION) != IDYES {
+            return Ok(());
+        }
+        let destination = self.root.join("settings.json");
+        if destination.exists() {
+            let backup = self.root.join(format!(
+                "settings-before-import-{}.json",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_err(|e| e.to_string())?
+                    .as_nanos()
+            ));
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(backup)
+                .map_err(|e| e.to_string())?;
+            use std::io::Write;
+            file.write_all(&read_bounded(&destination, 64 * 1024).map_err(|e| e.to_string())?)
+                .map_err(|e| e.to_string())?;
+            file.sync_all().map_err(|e| e.to_string())?;
+        }
+        next.save(&destination)?;
+        self.settings = next;
+        self.close_control_center();
+        self.show_settings();
+        self.settings_notice(
+            "Preferences imported. Previous settings backed up if present.",
+            false,
+        );
+        self.entries.truncate(self.limit());
+        self.refresh();
+        self.reindex();
+        Ok(())
     }
 }
 
@@ -1213,7 +1409,41 @@ unsafe extern "system" fn edit_proc(
     if msg == WM_NCDESTROY {
         RemoveWindowSubclass(hwnd, Some(edit_proc), subclass);
     }
-    let result = DefSubclassProc(hwnd, msg, w, l);
+    let result = if subclass == 2 && msg == WM_MOUSEWHEEL {
+        // No native scrollbar chrome, but preserve wheel/trackpad scrolling.
+        // Accumulate high-resolution deltas and respect Windows' scroll setting.
+        let delta = ((w >> 16) as u16) as i16 as i32;
+        let steps = RESULT_WHEEL_REMAINDER.with(|remainder| {
+            let total = remainder.get() + delta;
+            remainder.set(total % 120);
+            total / 120
+        });
+        if steps != 0 {
+            let mut lines = 3u32;
+            SystemParametersInfoW(
+                SPI_GETWHEELSCROLLLINES,
+                0,
+                (&mut lines as *mut u32).cast(),
+                0,
+            );
+            let count = SendMessageW(hwnd, LB_GETCOUNT, 0, 0).max(0);
+            let top = SendMessageW(hwnd, LB_GETTOPINDEX, 0, 0).max(0);
+            let mut rect: RECT = zeroed();
+            GetClientRect(hwnd, &mut rect);
+            let height = SendMessageW(hwnd, LB_GETITEMHEIGHT, 0, 0).max(1);
+            let visible = ((rect.bottom - rect.top) as isize / height).max(1);
+            let lines = if lines == u32::MAX {
+                visible
+            } else {
+                lines.min(100) as isize
+            };
+            let next = (top - steps as isize * lines).clamp(0, (count - visible).max(0));
+            SendMessageW(hwnd, LB_SETTOPINDEX, next as usize, 0);
+        }
+        0
+    } else {
+        DefSubclassProc(hwnd, msg, w, l)
+    };
     if subclass == 2 && [WM_MOUSEWHEEL, WM_VSCROLL, WM_KEYUP].contains(&msg) {
         APP.with(|cell| {
             if let Ok(mut slot) = cell.try_borrow_mut() {
@@ -1265,13 +1495,22 @@ pub fn run() -> Result<(), String> {
 unsafe fn run_native() -> Result<(), String> {
     let _shell = ShellApartment::initialize()?;
     let args: Vec<_> = std::env::args().skip(1).collect();
-    if args
-        .iter()
-        .any(|a| !["--portable", "--background", "--smoke-test"].contains(&a.as_str()))
-    {
-        return Err("Supported options: --portable, --background, --smoke-test".into());
+    if args.iter().any(|a| {
+        ![
+            "--portable",
+            "--background",
+            "--smoke-test",
+            "--file-search-benchmark",
+        ]
+        .contains(&a.as_str())
+    }) {
+        return Err(
+            "Supported options: --portable, --background, --smoke-test, --file-search-benchmark"
+                .into(),
+        );
     }
-    let smoke = args.iter().any(|a| a == "--smoke-test");
+    let benchmark = args.iter().any(|a| a == "--file-search-benchmark");
+    let smoke = benchmark || args.iter().any(|a| a == "--smoke-test");
     let portable = args.iter().any(|a| a == "--portable");
     // An independent singleton; the WPF and Flow applications are untouched.
     let mutex = CreateMutexW(
@@ -1349,6 +1588,7 @@ unsafe fn run_native() -> Result<(), String> {
     let mut app = App {
         hwnd: null_mut(),
         settings_hwnd: null_mut(),
+        web_hwnd: null_mut(),
         center: settings::Center::default(),
         edit: null_mut(),
         list: null_mut(),
@@ -1365,12 +1605,30 @@ unsafe fn run_native() -> Result<(), String> {
         background: null_mut(),
         field: null_mut(),
         selected: null_mut(),
+        bookmark_status: if settings.bookmarks {
+            "Bookmarks waiting for the background scan.".into()
+        } else {
+            "Bookmarks off. Browser files are not read.".into()
+        },
+        bookmark_permission: Arc::new(AtomicBool::new(settings.bookmarks)),
         settings,
         root: root.clone(),
         entries: vec![],
         folders: vec![],
+        bookmarks: vec![],
+        browser_root: if smoke {
+            Some(root.join("browser-fixtures"))
+        } else {
+            std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
+        },
         rows: vec![],
         worker: None,
+        file_worker: None,
+        file_query: String::new(),
+        file_entries: vec![],
+        file_error: None,
+        file_pending: false,
+        shown_query: String::new(),
         reindex_again: false,
         portable,
         popup: false,
@@ -1433,7 +1691,29 @@ unsafe fn run_native() -> Result<(), String> {
                 SendMessageW(app.list, LB_GETCOUNT, 0, 0) != 1 {
                 return Err("Native calculator/search list smoke test failed.".into());
             }
-            let report = memory_report()?;
+            let file = root.join("native-file-smoke.txt");
+            std::fs::write(&file, b"File result binding").map_err(|e| e.to_string())?;
+            validate_file(&file)?;
+            SetWindowTextW(app.edit, wide("file: native-file-smoke").as_ptr());
+            app.file_query = "native-file-smoke".into();
+            app.file_entries = vec![FileEntry { path: file.clone() }];
+            app.refresh();
+            if app.rows.len() != 1
+                || !matches!(&app.rows[0].action, Action::File(path) if path == &file)
+                || SendMessageW(app.list, LB_GETCOUNT, 0, 0) != 1
+                || SendMessageW(app.list, LB_GETCURSEL, 0, 0) != 0
+            {
+                return Err("Native file result/list selection smoke test failed.".into());
+            }
+            std::fs::remove_file(&file).map_err(|e| e.to_string())?;
+            if validate_file(&file).is_ok() {
+                return Err("Deleted file was still allowed to open.".into());
+            }
+            let report = if benchmark {
+                super::benchmark::run(&root)?
+            } else {
+                memory_report()?
+            };
             app.show_settings();
             if app.settings_hwnd.is_null() || GetDlgItem(app.settings_hwnd, SAVE as i32).is_null() {
                 return Err("Native settings smoke test failed.".into());
@@ -1497,7 +1777,11 @@ unsafe fn run_native() -> Result<(), String> {
                 .map_err(|e| e.to_string())?
                 .parent()
                 .ok_or("Missing executable folder")?
-                .join("smoke-result.txt");
+                .join(if benchmark {
+                    "file-search-benchmark.txt"
+                } else {
+                    "smoke-result.txt"
+                });
             std::fs::copy(root.join("smoke-result.txt"), output).map_err(|e| e.to_string())?;
         }
         let _ = std::fs::remove_dir_all(&root);
@@ -1512,14 +1796,16 @@ unsafe fn run_native() -> Result<(), String> {
                 return Err("Windows message loop failed.".into());
             }
             // IsDialogMessage dispatches synchronously: release state first.
-            let settings_window = APP.with(|cell| {
+            let (settings_window, web_window) = APP.with(|cell| {
                 cell.borrow()
                     .as_ref()
-                    .map(|app| app.settings_hwnd)
-                    .unwrap_or(null_mut())
+                    .map(|app| (app.settings_hwnd, app.web_hwnd))
+                    .unwrap_or((null_mut(), null_mut()))
             });
-            let handled = !settings_window.is_null()
-                && (settings::translate_key(&msg) || IsDialogMessageW(settings_window, &msg) != 0);
+            let handled = (!web_window.is_null() && IsDialogMessageW(web_window, &msg) != 0)
+                || (!settings_window.is_null()
+                    && (settings::translate_key(&msg)
+                        || IsDialogMessageW(settings_window, &msg) != 0));
             if !handled {
                 TranslateMessage(&msg);
                 DispatchMessageW(&msg);
@@ -1550,3 +1836,5 @@ unsafe fn run_native() -> Result<(), String> {
     CloseHandle(mutex);
     setup
 }
+
+const FILE_TIMER: usize = 42;

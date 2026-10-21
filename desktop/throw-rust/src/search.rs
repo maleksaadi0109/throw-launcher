@@ -1,4 +1,5 @@
 use crate::folders::{self, Folder};
+pub use crate::web::{percent_encode, safe_url};
 use crate::{calculator, config::Settings, index::Entry};
 use std::path::PathBuf;
 
@@ -10,6 +11,7 @@ pub enum Action {
     Utility(crate::commands::UtilityCommand),
     App(usize),
     Folder(PathBuf),
+    File(PathBuf),
     Url(String),
     Copy(String),
     Settings,
@@ -34,11 +36,24 @@ pub fn query_all(
     folders: &[Folder],
     settings: &Settings,
 ) -> Vec<ResultRow> {
+    query_sources(input, entries, folders, &[], settings)
+}
+
+pub fn query_sources(
+    input: &str,
+    entries: &[Entry],
+    folders: &[Folder],
+    bookmarks: &[crate::bookmarks::Bookmark],
+    settings: &Settings,
+) -> Vec<ResultRow> {
     let input = input.trim();
-    if input.len() > MAX_QUERY || input.contains('\0') {
+    if input.len() > MAX_QUERY || input.chars().any(char::is_control) {
         return vec![];
     }
     let mut rows = Vec::new();
+    if input.starts_with("file:") {
+        return rows;
+    }
     if input.starts_with('>') {
         rows = crate::commands::search(input.trim_start_matches('>'));
         rows.truncate(settings.max_results);
@@ -56,19 +71,18 @@ pub fn query_all(
             })
             .unwrap_or_default();
     }
-    if settings.web_search && input.starts_with('?') {
-        let terms = input.trim_start_matches('?').trim();
-        if !terms.is_empty() {
-            rows.push(ResultRow {
-                title: format!("Search the web for {terms}"),
-                detail: "Opens DuckDuckGo in your default browser".into(),
-                action: Action::Url(format!(
-                    "https://duckduckgo.com/?q={}",
-                    percent_encode(terms)
-                )),
-            });
+    if settings.web_search {
+        if let Some((provider, terms)) = crate::web::match_provider(input, &settings.web_providers)
+        {
+            if let Some(url) = provider.destination(terms) {
+                rows.push(ResultRow {
+                    title: format!("Search {} for {terms}", provider.name),
+                    detail: format!("Web · {} · {}", provider.keyword, provider.name),
+                    action: Action::Url(url),
+                });
+            }
+            return rows;
         }
-        return rows;
     }
     if let Some(url) = safe_url(input) {
         rows.push(ResultRow {
@@ -90,7 +104,7 @@ pub fn query_all(
     }
     let needle = input.to_lowercase();
     // Keep only top-k, not a second allocation proportional to the full app index.
-    let mut best: Vec<(i64, bool, usize)> = Vec::with_capacity(settings.max_results + 1);
+    let mut best: Vec<(i64, u8, usize)> = Vec::with_capacity(settings.max_results + 1);
     for (i, entry) in entries.iter().enumerate() {
         let name = entry.name.to_lowercase();
         let Some(mut score) = score(&needle, &name) else {
@@ -104,7 +118,7 @@ pub fn query_all(
             .min(25) as i64;
         let position = best.partition_point(|&(s, _, _)| s >= score);
         if position < settings.max_results {
-            best.insert(position, (score, false, i));
+            best.insert(position, (score, 0, i));
             best.truncate(settings.max_results);
         }
     }
@@ -115,20 +129,45 @@ pub fn query_all(
             };
             let position = best.partition_point(|&(s, _, _)| s >= score);
             if position < settings.max_results {
-                best.insert(position, (score, true, i));
+                best.insert(position, (score, 1, i));
                 best.truncate(settings.max_results);
             }
         }
     }
-    for (_, folder, i) in best {
-        rows.push(if folder {
-            folder_row(&folders[i])
-        } else {
-            ResultRow {
+    if settings.bookmarks && !needle.is_empty() {
+        for (i, bookmark) in bookmarks
+            .iter()
+            .take(crate::bookmarks::MAX_BOOKMARKS)
+            .enumerate()
+        {
+            let Some(score) = score(&needle, &bookmark.title.to_lowercase())
+                .or_else(|| score(&needle, &bookmark.url.to_lowercase()).map(|s| s - 100))
+            else {
+                continue;
+            };
+            if safe_url(&bookmark.url).is_none() {
+                continue;
+            }
+            let position = best.partition_point(|&(s, _, _)| s >= score);
+            if position < settings.max_results {
+                best.insert(position, (score, 2, i));
+                best.truncate(settings.max_results);
+            }
+        }
+    }
+    for (_, kind, i) in best {
+        rows.push(match kind {
+            1 => folder_row(&folders[i]),
+            2 => ResultRow {
+                title: bookmarks[i].title.clone(),
+                detail: format!("Bookmark · {} · {}", bookmarks[i].source, bookmarks[i].url),
+                action: Action::Url(bookmarks[i].url.clone()),
+            },
+            _ => ResultRow {
                 title: entries[i].name.clone(),
                 detail: entries[i].path.to_string_lossy().into_owned(),
                 action: Action::App(i),
-            }
+            },
         });
     }
     // Mix the known/root folders into the empty-query launch list, rather than
@@ -144,6 +183,9 @@ pub fn query_all(
     // on the empty launch screen. No user text becomes an executable argument.
     if needle.chars().count() >= 2 {
         let mut commands = crate::commands::search(&needle);
+        // Throw preferences live in the Settings button and explicit > palette.
+        // Ordinary "settings" searches should surface Windows settings instead.
+        commands.retain(|row| !matches!(row.action, Action::Settings));
         commands.append(&mut rows);
         commands.truncate(settings.max_results);
         rows = commands;
@@ -179,33 +221,6 @@ fn score(needle: &str, name: &str) -> Option<i64> {
     Some(200 - name.len().min(100) as i64)
 }
 
-/// Explicit HTTP(S) only. No file:, javascript:, shell: or executable protocols.
-pub fn safe_url(input: &str) -> Option<String> {
-    if input.len() > MAX_QUERY || input.chars().any(|c| c.is_control() || c.is_whitespace()) {
-        return None;
-    }
-    let rest = input
-        .strip_prefix("https://")
-        .or_else(|| input.strip_prefix("http://"))?;
-    let authority = rest.split(['/', '?', '#']).next()?;
-    if authority.is_empty() || authority.contains(['@', '\\', '"', '<', '>']) {
-        return None;
-    }
-    Some(input.into())
-}
-
-pub fn percent_encode(input: &str) -> String {
-    let mut out = String::new();
-    for byte in input.bytes() {
-        if byte.is_ascii_alphanumeric() || b"-_.~".contains(&byte) {
-            out.push(byte as char);
-        } else {
-            out.push_str(&format!("%{byte:02X}"));
-        }
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,6 +244,18 @@ mod tests {
     fn commands_and_actions() {
         let s = Settings::default();
         assert!(matches!(query(">quit", &[], &s)[0].action, Action::Quit));
+        for text in ["settings", "setting", "seting"] {
+            assert!(!query(text, &[], &s)
+                .iter()
+                .any(|r| matches!(r.action, Action::Settings)));
+        }
+        assert!(query("settings", &[], &s).iter().any(|r| matches!(
+            r.action,
+            Action::Utility(crate::commands::UtilityCommand::WindowsSettings(_))
+        )));
+        assert!(query(">settings", &[], &s)
+            .iter()
+            .any(|r| matches!(r.action, Action::Settings)));
         assert!(matches!(&query("= 2+3", &[], &s)[0].action, Action::Copy(v) if v == "5"));
         assert!(query("= 1/0", &[], &s).is_empty());
         assert_eq!(query("?", &[], &s).len(), 0);
@@ -259,6 +286,57 @@ mod tests {
         }
         assert!(safe_url("https://example.com/path?q=a").is_some());
         assert_eq!(percent_encode("a&b é"), "a%26b%20%C3%A9");
+    }
+    #[test]
+    fn bookmark_and_provider_actions_are_real_optional_and_bounded() {
+        let bookmarks = [
+            crate::bookmarks::Bookmark {
+                title: "Rust handbook".into(),
+                url: "https://rust-lang.org/learn".into(),
+                source: "Chrome".into(),
+            },
+            crate::bookmarks::Bookmark {
+                title: "Rust unsafe".into(),
+                url: "file:///evil.exe".into(),
+                source: "Untrusted".into(),
+            },
+        ];
+        let mut settings = Settings::default();
+        assert!(query_sources("handbook", &[], &[], &bookmarks, &settings).is_empty());
+        settings.bookmarks = true;
+        let rows = query_sources("handbook", &[], &[], &bookmarks, &settings);
+        assert!(
+            matches!(&rows[0].action, Action::Url(url) if url == "https://rust-lang.org/learn")
+        );
+        assert_eq!(
+            query_sources("rust", &[], &[], &bookmarks, &settings).len(),
+            1
+        );
+        assert!(query_sources("", &[], &[], &bookmarks, &settings).is_empty());
+        settings.web_providers.push(crate::web::Provider {
+            name: "Example".into(),
+            keyword: "ex".into(),
+            template: "https://example.com/search?q={query}".into(),
+            enabled: true,
+        });
+        assert!(
+            matches!(&query("EX a&b é", &[], &settings)[0].action, Action::Url(url) if url == "https://example.com/search?q=a%26b%20%C3%A9")
+        );
+        assert!(query("ex", &[], &settings).is_empty());
+        settings.web_providers[1].enabled = false;
+        assert!(query("ex something", &[], &settings).is_empty());
+        settings.web_search = false;
+        assert!(query("?something", &[], &settings).is_empty());
+        assert!(query("= 2 + 3", &[], &settings).len() == 1);
+        settings.web_search = true;
+        settings.web_providers.clear();
+        assert!(query("?something", &[], &settings).is_empty());
+        assert!(query("https://example.com", &[], &settings).len() == 1);
+        let lots = vec![bookmarks[0].clone(); 200];
+        assert_eq!(
+            query_sources("handbook", &[], &[], &lots, &settings).len(),
+            settings.max_results
+        );
     }
     #[test]
     fn result_count_and_history_influence() {

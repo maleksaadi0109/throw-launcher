@@ -18,6 +18,8 @@ pub struct Settings {
     pub hide_on_focus_loss: bool,
     pub calculator: bool,
     pub web_search: bool,
+    pub bookmarks: bool,
+    pub web_providers: Vec<crate::web::Provider>,
     pub remember_history: bool,
     pub hotkey: Hotkey,
     pub theme: Theme,
@@ -49,6 +51,8 @@ impl Default for Settings {
             hide_on_focus_loss: true,
             calculator: true,
             web_search: true,
+            bookmarks: false,
+            web_providers: crate::web::defaults(),
             remember_history: true,
             hotkey: Hotkey::default(),
             theme: Theme::default(),
@@ -60,6 +64,7 @@ impl Default for Settings {
 
 impl Settings {
     pub fn validate(&self) -> Result<(), String> {
+        crate::web::validate_providers(&self.web_providers)?;
         if self.version != 1 {
             return Err("Unsupported settings version.".into());
         }
@@ -146,12 +151,24 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
         .parent()
         .ok_or_else(|| io::Error::other("Missing parent directory"))?;
     fs::create_dir_all(parent)?;
-    let temp = path.with_extension("tmp");
+    // Never truncate/follow a predictable temporary file left by another process.
+    static NEXT_TEMP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let temp = path.with_extension(format!(
+        "tmp-{}-{}",
+        std::process::id(),
+        NEXT_TEMP.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
     let mut file = fs::OpenOptions::new()
         .write(true)
-        .create(true)
-        .truncate(true)
+        .create_new(true)
         .open(&temp)?;
+    struct Cleanup<'a>(&'a Path);
+    impl Drop for Cleanup<'_> {
+        fn drop(&mut self) {
+            let _ = fs::remove_file(self.0);
+        }
+    }
+    let _cleanup = Cleanup(&temp);
     file.write_all(bytes)?;
     file.sync_all()?;
     drop(file);
@@ -175,7 +192,7 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
         }
     }
     #[cfg(not(windows))]
-    fs::rename(temp, path)?;
+    fs::rename(&temp, path)?;
     Ok(())
 }
 
@@ -291,6 +308,38 @@ mod tests {
         s.save(&path).unwrap();
         assert_eq!(Settings::load(&path).unwrap(), s);
         assert!(read_bounded(&path, 1).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn web_preferences_migrate_and_reject_invalid_updates_without_data_loss() {
+        let old: Settings = serde_json::from_str(r#"{"version":1,"web_search":false}"#).unwrap();
+        assert!(!old.bookmarks && !old.web_search && old.lite);
+        assert_eq!(old.web_providers, crate::web::defaults());
+        assert!(serde_json::from_str::<Settings>(r#"{"web_providers":[{"name":"X","keyword":"x","template":"https://a/{query}","enabled":true,"command":"evil"}]}"#).is_err());
+        let root =
+            std::env::temp_dir().join(format!("throw-web-config-test-{}", std::process::id()));
+        let path = root.join("settings.json");
+        let mut s = Settings {
+            bookmarks: true,
+            ..Settings::default()
+        };
+        s.web_providers.push(crate::web::Provider {
+            name: "Wiki".into(),
+            keyword: "wiki".into(),
+            template: "https://en.wikipedia.org/w/index.php?search={query}".into(),
+            enabled: false,
+        });
+        s.save(&path).unwrap();
+        assert_eq!(Settings::load(&path).unwrap(), s);
+        let before = fs::read(&path).unwrap();
+        s.web_providers[1].keyword = "?".into();
+        assert!(s.save(&path).is_err());
+        assert_eq!(fs::read(&path).unwrap(), before);
+        s.web_providers.clear();
+        s.save(&path).unwrap();
+        assert!(Settings::load(&path).unwrap().web_providers.is_empty());
+        fs::write(&path, br#"{"web_providers":[{"name":"Evil","keyword":"x","template":"file:///{query}","enabled":true}]}"#).unwrap();
+        assert!(Settings::load(&path).is_err());
         fs::remove_dir_all(root).unwrap();
     }
 }

@@ -10,6 +10,7 @@ pub(super) unsafe fn verify_and_capture(root: &Path) -> Result<(), String> {
     verify_edit_shortcuts()?;
     verify_folders_and_scroll(root)?;
     verify_command_palette()?;
+    super::web_smoke::verify(root)?;
     let menu = actions::build_menu();
     if menu.is_null() || GetMenuItemCount(menu) != 7 {
         return Err("Result action menu is incomplete.".into());
@@ -120,6 +121,7 @@ pub(super) unsafe fn verify_and_capture(root: &Path) -> Result<(), String> {
         return Err("Lite icon cache exceeded its bound.".into());
     }
     let report = format!("{}\nReal Shell icons loaded for apps and folders.\nThree-row viewport, native scrolling, folder/path search and background-selection stability verified.\nNative Ctrl+A/C/V/X/Z editing verified with focus in search and results. Alt+1 calculator activation verified.\nCommand palette binding, reboot alias and native confirmation cancellation verified. No power/session/delete action was executed; successful system changes require real-device testing.\nSettings: six sections, keyboard focus, draft preservation, save/reload, failed-save recovery, theme-command synchronization and 96/144/192 DPI layout verified. Native captures include all six sections in both themes and Appearance at 150%/200%. Real mixed-monitor dragging still needs device verification.\nApp and folder menus constructed; shortcut target resolution covered by Windows tests. No apps, folders or elevated processes launched.\n{count} icons cached. Lite maximum 48; Standard maximum 96.\nThis CI sample is not a real-world idle memory benchmark.", memory_report()?);
+    let report = format!("{report}\nNative bookmark opt-in/disable, fixture discovery, safe URL binding, error reporting and provider create/edit/disable/delete persistence verified. Invalid and failed saves preserved previous settings. No personal browser profiles read or browsers launched.");
     std::fs::write(root.join("smoke-result.txt"), report).map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -229,6 +231,7 @@ unsafe fn verify_folders_and_scroll(root: &Path) -> Result<(), String> {
         folders.push(Folder::new(path).unwrap());
         sender
             .send(Ok(IndexResult {
+                bookmarks: bookmarks::Scan::default(),
                 apps: Scan {
                     entries: app.entries.clone(),
                     unreadable: 0,
@@ -256,11 +259,26 @@ unsafe fn verify_folders_and_scroll(root: &Path) -> Result<(), String> {
     if rect.bottom != row_height * 3 || SendMessageW(list, LB_GETCOUNT, 0, 0) <= 3 {
         return Err(format!("Expected three visible rows and more scrollable results; height {}, row height {row_height}.", rect.bottom));
     }
-    SendMessageW(list, WM_VSCROLL, SB_BOTTOM as usize, 0);
-    if SendMessageW(list, LB_GETTOPINDEX, 0, 0) <= 0 {
-        return Err("Native scrolling did not reveal additional results.".into());
+    if GetWindowLongPtrW(list, GWL_STYLE) as u32 & WS_VSCROLL != 0 {
+        return Err("Result scrollbar chrome is still enabled.".into());
     }
-    SendMessageW(list, WM_VSCROLL, SB_TOP as usize, 0);
+    // Exercise the actual wheel route, including two high-resolution half ticks.
+    RESULT_WHEEL_REMAINDER.with(|value| value.set(0));
+    SendMessageW(list, WM_MOUSEWHEEL, ((-60i16 as u16 as usize) << 16), 0);
+    if SendMessageW(list, LB_GETTOPINDEX, 0, 0) != 0 {
+        return Err("Partial wheel delta was not accumulated.".into());
+    }
+    SendMessageW(list, WM_MOUSEWHEEL, ((-60i16 as u16 as usize) << 16), 0);
+    if SendMessageW(list, LB_GETTOPINDEX, 0, 0) <= 0 {
+        return Err("Hidden-scrollbar wheel route did not reveal more results.".into());
+    }
+    SendMessageW(list, LB_SETTOPINDEX, 0, 0);
+    SendMessageW(list, WM_KEYDOWN, VK_END as usize, 0);
+    SendMessageW(list, WM_KEYUP, VK_END as usize, 0);
+    if SendMessageW(list, LB_GETTOPINDEX, 0, 0) <= 0 {
+        return Err("Keyboard navigation no longer scrolls hidden-bar results.".into());
+    }
+    SendMessageW(list, LB_SETTOPINDEX, 0, 0);
     SendMessageW(list, LB_SETCURSEL, 0, 0);
     let menu = actions::build_menu_for(true);
     if menu.is_null() || GetMenuItemCount(menu) != 4 {
@@ -358,7 +376,7 @@ unsafe fn verify_edit_shortcuts() -> Result<(), String> {
     result
 }
 
-unsafe fn capture(hwnd: HWND, path: &Path) -> Result<(), String> {
+pub(super) unsafe fn capture(hwnd: HWND, path: &Path) -> Result<(), String> {
     let mut client: RECT = zeroed();
     GetClientRect(hwnd, &mut client);
     let width = client.right;
