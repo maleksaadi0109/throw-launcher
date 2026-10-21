@@ -1,4 +1,7 @@
+use super::icons::{IconCache, ICONS_READY};
 use super::platform::*;
+mod snapshot;
+mod visuals;
 use std::{
     cell::{Cell, RefCell},
     mem::{size_of, zeroed},
@@ -62,10 +65,12 @@ struct App {
     font: HFONT,
     small_font: HFONT,
     heading_font: HFONT,
+    input_font: HFONT,
     background: HBRUSH,
     field: HBRUSH,
     selected: HBRUSH,
     icon: HICON,
+    icons: Option<IconCache>,
     scale: f64,
     settings: Settings,
     root: PathBuf,
@@ -161,9 +166,16 @@ impl App {
             "",
             SEARCH,
             WS_TABSTOP | ES_AUTOHSCROLL as u32,
-            [24, 86, 656, 40],
+            [70, 101, 580, 30],
         );
         SendMessageW(self.edit, EM_SETLIMITTEXT, 512, 0);
+        SendMessageW(self.edit, WM_SETFONT, self.input_font as usize, 1);
+        SendMessageW(
+            self.edit,
+            EM_SETCUEBANNER,
+            0,
+            wide("Search apps, = calculate, ? search web").as_ptr() as isize,
+        );
         // Keyboard navigation belongs to the launcher, not to the edit control.
         if SetWindowSubclass(self.edit, Some(edit_proc), 1, 0) == 0 {
             return Err("Cannot attach search keyboard controls.".into());
@@ -179,27 +191,27 @@ impl App {
                 | LBS_HASSTRINGS as u32
                 | LBS_OWNERDRAWFIXED as u32
                 | LBS_NOINTEGRALHEIGHT as u32,
-            [24, 146, 656, 352],
+            [20, 176, 704, 448],
         );
         if SetWindowSubclass(self.list, Some(edit_proc), 2, 0) == 0 {
             return Err("Cannot attach result keyboard controls.".into());
         }
-        SendMessageW(self.list, LB_SETITEMHEIGHT, 0, self.px(44) as isize);
+        SendMessageW(self.list, LB_SETITEMHEIGHT, 0, self.px(56) as isize);
         self.control(
             self.hwnd,
             "BUTTON",
             "Settings",
             SETTINGS_BUTTON,
-            WS_TABSTOP | BS_PUSHBUTTON as u32,
-            [570, 24, 110, 32],
+            WS_TABSTOP | BS_OWNERDRAW as u32,
+            [620, 26, 104, 34],
         );
         self.status = self.control(
             self.hwnd,
             "STATIC",
             "Preparing app index...",
             110,
-            0,
-            [24, 516, 656, 26],
+            SS_ENDELLIPSIS as u32,
+            [20, 638, 400, 24],
         );
         SendMessageW(self.status, WM_SETFONT, self.small_font as usize, 1);
         if [self.edit, self.list, self.status]
@@ -208,8 +220,69 @@ impl App {
         {
             return Err("Windows could not create launcher controls.".into());
         }
+        self.layout();
         self.refresh();
         Ok(())
+    }
+
+    unsafe fn layout(&self) {
+        let mut client: RECT = zeroed();
+        GetClientRect(self.hwnd, &mut client);
+        let width = client.right;
+        let height = client.bottom;
+        MoveWindow(
+            self.edit,
+            self.px(68),
+            self.px(103),
+            (width - self.px(100)).max(1),
+            self.px(29),
+            1,
+        );
+        MoveWindow(
+            GetDlgItem(self.hwnd, SETTINGS_BUTTON as i32),
+            width - self.px(124),
+            self.px(26),
+            self.px(104),
+            self.px(34),
+            1,
+        );
+        MoveWindow(
+            self.list,
+            self.px(20),
+            self.px(176),
+            (width - self.px(40)).max(1),
+            (height - self.px(220)).max(self.px(56)),
+            1,
+        );
+        MoveWindow(
+            self.status,
+            self.px(20),
+            height - self.px(30),
+            if width >= self.px(520) {
+                width - self.px(290)
+            } else {
+                width - self.px(40)
+            },
+            self.px(22),
+            1,
+        );
+    }
+
+    fn request_result_icons(&mut self) {
+        if let Some(icons) = self.icons.as_mut() {
+            icons.set_lite(self.settings.lite);
+            icons.drain();
+            icons.request(self.rows.iter().filter_map(|row| {
+                match row.action {
+                    Action::App(i) => self
+                        .entries
+                        .get(i)
+                        .filter(|e| e.valid())
+                        .map(|e| e.path.clone()),
+                    _ => None,
+                }
+            }));
+        }
     }
 
     unsafe fn set_status(&self, message: &str) {
@@ -221,6 +294,7 @@ impl App {
         let count = GetWindowTextW(self.edit, text.as_mut_ptr(), text.len() as i32);
         let text = String::from_utf16_lossy(&text[..count.max(0) as usize]);
         self.rows = search::query(&text, &self.entries, &self.settings);
+        self.request_result_icons();
         SendMessageW(self.list, LB_RESETCONTENT, 0, 0);
         for row in &self.rows {
             SendMessageW(
@@ -238,7 +312,7 @@ impl App {
                 "No matches. Try ? web search, = calculator, or > commands.".into()
             } else {
                 format!(
-                    "{} apps  •  {}  •  Enter to open  •  Esc to hide",
+                    "{} apps  /  {} mode",
                     self.entries.len(),
                     if self.settings.lite {
                         "Lite"
@@ -248,7 +322,16 @@ impl App {
                 )
             });
         }
+        ShowWindow(
+            self.list,
+            if self.rows.is_empty() {
+                SW_HIDE
+            } else {
+                SW_SHOW
+            },
+        );
         InvalidateRect(self.list, null(), 0);
+        InvalidateRect(self.hwnd, null(), 0);
     }
 
     unsafe fn show(&self) {
@@ -298,6 +381,9 @@ impl App {
             .and_then(|receiver| receiver.try_recv().ok());
         match result {
             Some(Ok(mut scan)) => {
+                if let Some(icons) = self.icons.as_mut() {
+                    icons.clear();
+                }
                 // Settings may have changed while the background scan ran.
                 scan.entries.truncate(self.limit());
                 self.entries = scan.entries;
@@ -750,96 +836,21 @@ impl App {
     }
 
     unsafe fn paint(&self, hwnd: HWND) {
-        let mut ps = zeroed();
-        let dc = BeginPaint(hwnd, &mut ps);
-        let mut rect = zeroed();
-        GetClientRect(hwnd, &mut rect);
-        FillRect(dc, &rect, self.background);
-        if hwnd == self.hwnd {
-            SetBkMode(dc, TRANSPARENT as i32);
-            SetTextColor(dc, rgb(253, 102, 43));
-            SelectObject(dc, self.heading_font);
-            let mut title = RECT {
-                left: self.px(24),
-                top: self.px(18),
-                right: self.px(500),
-                bottom: self.px(53),
-            };
-            DrawTextW(
-                dc,
-                wide("THROW").as_ptr(),
-                -1,
-                &mut title,
-                DT_LEFT | DT_SINGLELINE,
-            );
-            SelectObject(dc, self.small_font);
-            SetTextColor(dc, self.muted());
-            let mut hint = RECT {
-                left: self.px(24),
-                top: self.px(55),
-                right: self.px(550),
-                bottom: self.px(80),
-            };
-            DrawTextW(
-                dc,
-                wide("Find an app. Get something done.").as_ptr(),
-                -1,
-                &mut hint,
-                DT_LEFT | DT_SINGLELINE,
-            );
-        }
-        EndPaint(hwnd, &ps);
+        visuals::paint(self, hwnd);
     }
 
     unsafe fn draw_row(&self, item: &DRAWITEMSTRUCT) {
-        if item.itemID == u32::MAX {
-            return;
-        }
-        let Some(row) = self.rows.get(item.itemID as usize) else {
-            return;
-        };
-        let dc = item.hDC;
-        FillRect(
-            dc,
-            &item.rcItem,
-            if item.itemState & ODS_SELECTED != 0 {
-                self.selected
-            } else {
-                self.background
-            },
-        );
-        SetBkMode(dc, TRANSPARENT as i32);
-        SelectObject(dc, self.font);
-        SetTextColor(dc, self.text_color());
-        let mut title = item.rcItem;
-        title.left += self.px(12);
-        title.top += self.px(2);
-        title.right -= self.px(8);
-        title.bottom = title.top + self.px(24);
-        DrawTextW(
-            dc,
-            wide(&row.title).as_ptr(),
-            -1,
-            &mut title,
-            DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
-        );
-        SelectObject(dc, self.small_font);
-        SetTextColor(dc, self.muted());
-        let mut detail = item.rcItem;
-        detail.left += self.px(12);
-        detail.top += self.px(25);
-        detail.right -= self.px(8);
-        DrawTextW(
-            dc,
-            wide(&row.detail).as_ptr(),
-            -1,
-            &mut detail,
-            DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
-        );
+        visuals::draw_row(self, item);
     }
 
     unsafe fn dispatch(&mut self, hwnd: HWND, msg: u32, w: usize, l: isize) -> Option<isize> {
         match msg {
+            WM_SIZE if hwnd == self.hwnd => {
+                if !self.edit.is_null() {
+                    self.layout();
+                }
+                Some(0)
+            }
             WM_PAINT => {
                 self.paint(hwnd);
                 Some(0)
@@ -866,6 +877,18 @@ impl App {
             WM_DRAWITEM if w == RESULTS => {
                 self.draw_row(&*(l as *const DRAWITEMSTRUCT));
                 Some(1)
+            }
+            WM_DRAWITEM if w == SETTINGS_BUTTON => {
+                visuals::draw_settings_button(self, &*(l as *const DRAWITEMSTRUCT));
+                Some(1)
+            }
+            ICONS_READY => {
+                if let Some(icons) = self.icons.as_mut() {
+                    icons.drain();
+                }
+                self.request_result_icons();
+                InvalidateRect(self.list, null(), 0);
+                Some(0)
             }
             WM_COMMAND => {
                 let id = w & 0xffff;
@@ -1010,6 +1033,9 @@ unsafe extern "system" fn edit_proc(
     subclass: usize,
     _: usize,
 ) -> isize {
+    if msg == WM_SETFOCUS || msg == WM_KILLFOCUS {
+        InvalidateRect(GetParent(hwnd), null(), 0);
+    }
     if msg == WM_KEYDOWN {
         if w == VK_RETURN as usize
             || w == VK_ESCAPE as usize
@@ -1180,6 +1206,8 @@ unsafe fn run_native() -> Result<(), String> {
         font: font(17, FW_NORMAL as i32),
         small_font: font(12, FW_NORMAL as i32),
         heading_font: font(29, FW_BOLD as i32),
+        input_font: font(21, FW_NORMAL as i32),
+        icons: None,
         background: null_mut(),
         field: null_mut(),
         selected: null_mut(),
@@ -1193,10 +1221,19 @@ unsafe fn run_native() -> Result<(), String> {
         popup: false,
     };
     app.rebuild_brushes();
-    let width = app.px(720);
-    let height = app.px(590);
-    let x = ((GetSystemMetrics(SM_CXSCREEN) - width) / 2).max(0);
-    let y = ((GetSystemMetrics(SM_CYSCREEN) - height) / 3).max(0);
+    let mut work: RECT = zeroed();
+    if SystemParametersInfoW(SPI_GETWORKAREA, 0, (&mut work as *mut RECT).cast(), 0) == 0 {
+        work.right = GetSystemMetrics(SM_CXSCREEN);
+        work.bottom = GetSystemMetrics(SM_CYSCREEN);
+    }
+    let width = app
+        .px(760)
+        .min((work.right - work.left - app.px(24)).max(app.px(360)));
+    let height = app
+        .px(716)
+        .min((work.bottom - work.top - app.px(24)).max(app.px(360)));
+    let x = work.left + ((work.right - work.left - width) / 2).max(0);
+    let y = work.top + ((work.bottom - work.top - height) / 3).max(0);
     app.hwnd = CreateWindowExW(
         WS_EX_APPWINDOW,
         wide(MAIN_CLASS).as_ptr(),
@@ -1215,12 +1252,13 @@ unsafe fn run_native() -> Result<(), String> {
         CloseHandle(mutex);
         return Err("Cannot create the launcher window.".into());
     }
+    app.icons = Some(IconCache::new(app.hwnd, app.settings.lite));
     SendMessageW(app.hwnd, WM_SETICON, ICON_BIG as usize, icon as isize);
     SendMessageW(app.hwnd, WM_SETICON, ICON_SMALL as usize, icon as isize);
     let hwnd = app.hwnd;
     MAIN_WINDOW.with(|window| window.set(hwnd));
     APP.with(|cell| *cell.borrow_mut() = Some(app));
-    let setup = APP.with(|cell| {
+    let mut setup = APP.with(|cell| {
         let mut slot = cell.borrow_mut();
         let app = slot.as_mut().unwrap();
         app.create_controls()?;
@@ -1244,6 +1282,17 @@ unsafe fn run_native() -> Result<(), String> {
             }
             std::fs::write(root.join("smoke-result.txt"), report).map_err(|e| e.to_string())?;
             DestroyWindow(app.settings_hwnd); app.settings_hwnd = null_mut();
+            // Real Shell icons, but no applications are executed by the test.
+            let windows = PathBuf::from(std::env::var_os("SystemRoot").ok_or("SystemRoot is missing")?);
+            app.entries = vec![
+                Entry { name: "Notepad".into(), path: windows.join("System32/notepad.exe") },
+                Entry { name: "File Explorer".into(), path: windows.join("explorer.exe") },
+                Entry { name: "Throw Launcher".into(), path: std::env::current_exe().map_err(|e| e.to_string())? },
+            ];
+            app.settings.hide_on_focus_loss = false;
+            SetWindowTextW(app.edit, wide("").as_ptr());
+            app.refresh();
+            app.show();
             return Ok(());
         }
         if !register_hotkey(app.hwnd, app.settings.hotkey) {
@@ -1262,6 +1311,9 @@ unsafe fn run_native() -> Result<(), String> {
     });
     if smoke {
         // Smoke mode never registers startup, hotkeys, tray or launches apps.
+        if setup.is_ok() {
+            setup = snapshot::verify_and_capture(&root);
+        }
         APP.with(|cell| {
             if let Some(app) = cell.borrow().as_ref() {
                 DestroyWindow(app.hwnd);
@@ -1309,6 +1361,7 @@ unsafe fn run_native() -> Result<(), String> {
                 app.font,
                 app.small_font,
                 app.heading_font,
+                app.input_font,
                 app.background,
                 app.field,
                 app.selected,

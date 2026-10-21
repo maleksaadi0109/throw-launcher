@@ -30,6 +30,12 @@ window rather than starting another background instance.
   20,000. Only Start menu and Desktop folders are scanned, once at startup or
   explicitly on request. There is no whole-drive index or background polling.
 - Ink/orange and Paper/orange appearance.
+- Native app icons in search results, loaded by a background Shell worker.
+  Only the current result set requests icons; the cache is bounded to 48 in
+  Lite mode or 96 in Standard. Evicted icon handles are destroyed, and loading
+  failures use the Throw fallback instead of blocking the search box.
+- Roomier result cards, an orange selection marker, a bordered search field,
+  keyboard hints, and a window sized to fit the available Windows work area.
 - 4–12 displayed results; more than eight use the bounded scrollable list.
 - Enable/disable calculator, web search, local launch history, startup hiding,
   and hide-on-focus-loss.
@@ -54,7 +60,7 @@ profile. Neither edition reads/writes Flow's or the C# edition's profile.
 This is a working foundation, **not full Flow feature parity**. Existing .NET,
 Python and JavaScript plugins cannot be loaded. Plugin marketplace, Everything
 file search, UWP-only app discovery, arbitrary shell commands, custom themes,
-extension APIs, rich icon previews, multilingual UI, automatic updating and a
+extension APIs, custom icon packs, multilingual UI, automatic updating and a
 signed installer are not implemented. Shortcuts to packaged applications in the
 Start menu can still work.
 
@@ -75,6 +81,8 @@ editions with equivalent shortcuts and features.
 not an idle benchmark on your PC. Working set and private committed memory are
 different metrics. The smoke test exercises native search/list controls,
 calculator result binding, embedded icon, settings controls and profile writes.
+It also verifies real Shell icons reach the result list and captures both
+appearance modes. The screenshots are a separate workflow artifact.
 It does not prove global-hotkey/tray interaction on every Windows desktop.
 
 There are no forced-GC timers, working-set trimming tricks, periodic resource

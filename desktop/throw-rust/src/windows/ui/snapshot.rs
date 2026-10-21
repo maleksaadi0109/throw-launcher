@@ -1,0 +1,139 @@
+//! Native Windows visual smoke evidence. Only invoked with --smoke-test.
+use super::*;
+use std::{
+    path::Path,
+    time::{Duration, Instant},
+};
+
+pub(super) unsafe fn verify_and_capture(root: &Path) -> Result<(), String> {
+    let deadline = Instant::now() + Duration::from_secs(8);
+    loop {
+        let mut msg: MSG = zeroed();
+        while PeekMessageW(&mut msg, null_mut(), 0, 0, PM_REMOVE) != 0 {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+        let ready = APP.with(|cell| {
+            let slot = cell.borrow();
+            let app = slot.as_ref().unwrap();
+            app.entries.iter().all(|entry| {
+                app.icons
+                    .as_ref()
+                    .and_then(|icons| icons.get(&entry.path))
+                    .is_some()
+            })
+        });
+        if ready {
+            break;
+        }
+        if Instant::now() >= deadline {
+            return Err("Real Shell icons did not reach the result list.".into());
+        }
+        std::thread::sleep(Duration::from_millis(15));
+    }
+    let hwnd = MAIN_WINDOW.with(|window| window.get());
+    let output = std::env::current_exe()
+        .map_err(|e| e.to_string())?
+        .parent()
+        .ok_or("Missing executable directory")?
+        .to_path_buf();
+    RedrawWindow(
+        hwnd,
+        null(),
+        null_mut(),
+        RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN,
+    );
+    capture(hwnd, &output.join("throw-ink.bmp"))?;
+    APP.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        let app = slot.as_mut().unwrap();
+        app.settings.theme = Theme::Light;
+        app.rebuild_brushes();
+    });
+    RedrawWindow(
+        hwnd,
+        null(),
+        null_mut(),
+        RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN,
+    );
+    capture(hwnd, &output.join("throw-paper.bmp"))?;
+    let count = APP.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .unwrap()
+            .icons
+            .as_ref()
+            .unwrap()
+            .len()
+    });
+    if count > 48 {
+        return Err("Lite icon cache exceeded its bound.".into());
+    }
+    let report = format!("{}\nReal Shell icons loaded for all three smoke-test apps.\n{count} icons cached. Lite maximum 48; Standard maximum 96.\nThis CI sample is not a real-world idle memory benchmark.", memory_report()?);
+    std::fs::write(root.join("smoke-result.txt"), report).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+unsafe fn capture(hwnd: HWND, path: &Path) -> Result<(), String> {
+    let mut client: RECT = zeroed();
+    GetClientRect(hwnd, &mut client);
+    let width = client.right;
+    let height = client.bottom;
+    if width <= 0 || height <= 0 || width > 4000 || height > 4000 {
+        return Err("Invalid native screenshot dimensions.".into());
+    }
+    let dc = GetDC(hwnd);
+    if dc.is_null() {
+        return Err("Cannot capture native client DC.".into());
+    }
+    let memory = CreateCompatibleDC(dc);
+    let bitmap = CreateCompatibleBitmap(dc, width, height);
+    if memory.is_null() || bitmap.is_null() {
+        if !memory.is_null() {
+            DeleteDC(memory);
+        }
+        if !bitmap.is_null() {
+            DeleteObject(bitmap);
+        }
+        ReleaseDC(hwnd, dc);
+        return Err("Cannot allocate native screenshot.".into());
+    }
+    let previous = SelectObject(memory, bitmap);
+    let copied = BitBlt(memory, 0, 0, width, height, dc, 0, 0, SRCCOPY);
+    SelectObject(memory, previous);
+    let mut info: BITMAPINFO = zeroed();
+    info.bmiHeader.biSize = size_of::<BITMAPINFOHEADER>() as u32;
+    info.bmiHeader.biWidth = width;
+    info.bmiHeader.biHeight = height;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    let mut pixels = vec![0u8; width as usize * height as usize * 4];
+    let lines = GetDIBits(
+        dc,
+        bitmap,
+        0,
+        height as u32,
+        pixels.as_mut_ptr().cast(),
+        &mut info,
+        DIB_RGB_COLORS,
+    );
+    DeleteObject(bitmap);
+    DeleteDC(memory);
+    ReleaseDC(hwnd, dc);
+    if copied == 0 || lines != height {
+        return Err("Native screenshot capture failed.".into());
+    }
+    let mut bytes = Vec::with_capacity(54 + pixels.len());
+    bytes.extend_from_slice(b"BM");
+    bytes.extend_from_slice(&((54 + pixels.len()) as u32).to_le_bytes());
+    bytes.extend_from_slice(&[0; 4]);
+    bytes.extend_from_slice(&54u32.to_le_bytes());
+    bytes.extend_from_slice(&40u32.to_le_bytes());
+    bytes.extend_from_slice(&width.to_le_bytes());
+    bytes.extend_from_slice(&height.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&32u16.to_le_bytes());
+    bytes.extend_from_slice(&[0; 24]);
+    bytes.extend_from_slice(&pixels);
+    std::fs::write(path, bytes).map_err(|e| e.to_string())
+}
