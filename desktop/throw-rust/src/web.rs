@@ -59,6 +59,15 @@ impl Provider {
 
 pub fn defaults() -> Vec<Provider> {
     vec![Provider {
+        name: "Google".into(),
+        keyword: "?".into(),
+        template: "https://www.google.com/search?q={query}".into(),
+        enabled: true,
+    }]
+}
+
+pub(crate) fn previous_defaults() -> Vec<Provider> {
+    vec![Provider {
         name: "DuckDuckGo".into(),
         keyword: "?".into(),
         template: "https://duckduckgo.com/?q={query}".into(),
@@ -207,7 +216,7 @@ mod tests {
             .is_none());
         assert_eq!(
             p.destination("a&b é#?").unwrap(),
-            "https://duckduckgo.com/?q=a%26b%20%C3%A9%23%3F"
+            "https://www.google.com/search?q=a%26b%20%C3%A9%23%3F"
         );
         p.enabled = false;
         assert!(p.destination("hello").is_none());

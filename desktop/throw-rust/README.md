@@ -105,7 +105,8 @@ are explicitly deferred; no .NET/Python/Node plugin runtime is loaded.
   prompts; some apps do not support alternate-user launch. Store-only links may
   not expose a filesystem target; an explanation is shown instead.
 - `= (12 + 3) * 2` calculates; Enter copies the answer.
-- `? search terms` uses the `?` web provider (DuckDuckGo by default).
+- `? search terms` searches Google by default. The provider can be changed in
+  Control Center → Search → **Bookmarks & web providers**.
   Add keyword providers such as `wiki search terms` in Control Center → Search →
   **Bookmarks & web providers**.
 - An explicit `https://…` or `http://…` URL opens in the default browser.
