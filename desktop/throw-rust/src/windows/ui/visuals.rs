@@ -24,6 +24,9 @@ unsafe fn rule(dc: HDC, left: i32, right: i32, y: i32, color: u32) {
 
 // Reads only: never install placeholder text in the native EDIT or disturb undo.
 unsafe fn query_scope(app: &App) -> &'static str {
+    if app.context.is_some() {
+        return "Actions";
+    }
     let mut value = [0u16; 513];
     let len = GetWindowTextW(app.edit, value.as_mut_ptr(), value.len() as i32);
     let query = String::from_utf16_lossy(&value[..len.max(0) as usize]);
@@ -225,7 +228,14 @@ pub(super) unsafe fn paint(app: &App, hwnd: HWND) {
             SelectObject(dc, app.small_font);
             text(
                 dc,
-                &format!("↑↓ Navigate    ↵ {verb}    Esc Hide"),
+                &format!(
+                    "↑↓ Navigate    ↵ {verb}    Esc {}",
+                    if app.context.is_some() {
+                        "Back"
+                    } else {
+                        "Hide"
+                    }
+                ),
                 RECT {
                     left: client.right - p(390),
                     top: client.bottom - p(30),
@@ -326,10 +336,7 @@ pub(super) unsafe fn draw_row(app: &App, item: &DRAWITEMSTRUCT) {
         Action::Folder(ref path) | Action::File(ref path) => {
             app.icons.as_ref().and_then(|cache| cache.get(path))
         }
-        _ => {
-            let icon = command_icons::load(app.instance, &row.action, icon_size);
-            (!icon.is_null()).then_some(icon)
-        }
+        _ => None,
     };
 
     if let Some(icon) = icon {
@@ -353,6 +360,7 @@ pub(super) unsafe fn draw_row(app: &App, item: &DRAWITEMSTRUCT) {
         };
         rounded(dc, tile, app.field, p(10), None);
         match row.action {
+            Action::Context(id) => command_icons::draw_context(dc, tile, icon_size, ACCENT, id),
             Action::App(_) => {
                 DrawIconEx(
                     dc,
@@ -372,19 +380,11 @@ pub(super) unsafe fn draw_row(app: &App, item: &DRAWITEMSTRUCT) {
                 icon_size,
                 if selected { ACCENT } else { app.muted() },
             ),
-            Action::Copy(_)
-            | Action::File(_)
-            | Action::Url(_)
-            | Action::Settings
-            | Action::Reindex
-            | Action::Quit => {
+            Action::Copy(_) | Action::File(_) | Action::Url(_) => {
                 let glyph = match row.action {
                     Action::Copy(_) => "=",
                     Action::File(_) => "▤",
                     Action::Url(_) => "↗",
-                    Action::Settings => "≡",
-                    Action::Reindex => "↻",
-                    Action::Quit => "×",
                     _ => unreachable!(),
                 };
                 SelectObject(dc, app.input_font);
@@ -392,7 +392,11 @@ pub(super) unsafe fn draw_row(app: &App, item: &DRAWITEMSTRUCT) {
             }
             // System and Utility commands (and future command kinds) get a
             // crisp terminal mark without depending on icon fonts or assets.
-            _ => command_mark(dc, tile, icon_size, ACCENT),
+            _ => {
+                if !command_icons::draw(dc, tile, icon_size, ACCENT, &row.action) {
+                    command_mark(dc, tile, icon_size, ACCENT);
+                }
+            }
         }
     }
 
@@ -430,9 +434,9 @@ pub(super) unsafe fn draw_row(app: &App, item: &DRAWITEMSTRUCT) {
         &row.title,
         RECT {
             left: item.rcItem.left + p(64),
-            top: item.rcItem.top + p(7),
+            top: item.rcItem.top + p(if app.context.is_some() { 16 } else { 7 }),
             right: hint_left - p(12),
-            bottom: item.rcItem.top + p(34),
+            bottom: item.rcItem.top + p(if app.context.is_some() { 48 } else { 34 }),
         },
         app.text_color(),
         DT_LEFT | DT_VCENTER,
@@ -473,7 +477,11 @@ pub(super) unsafe fn draw_settings_button(app: &App, item: &DRAWITEMSTRUCT) {
     SelectObject(item.hDC, app.small_font);
     text(
         item.hDC,
-        "Settings",
+        if app.context.is_some() {
+            "Back"
+        } else {
+            "Settings"
+        },
         rect,
         app.muted(),
         DT_CENTER | DT_VCENTER,
@@ -493,7 +501,9 @@ pub(super) unsafe fn draw_search_hint(app: &App, edit: HWND) {
     // Use the normal text face for discovery copy; the typed query retains the
     // larger input_font. Choose shorter wording instead of a crowded ellipsis.
     SelectObject(dc, app.font);
-    let hint = if rect.right - rect.left >= app.px(490) {
+    let hint = if app.context.is_some() {
+        "Filter actions…"
+    } else if rect.right - rect.left >= app.px(490) {
         "Apps & folders  ·  = calculate  ·  ? web  ·  > commands"
     } else if rect.right - rect.left >= app.px(390) {
         "Apps, folders  ·  = calc  ·  ? web  ·  > commands"

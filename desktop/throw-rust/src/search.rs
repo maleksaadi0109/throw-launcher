@@ -7,6 +7,8 @@ pub const MAX_QUERY: usize = 512;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
+    /// Internal native action-panel route; never generated from search text.
+    Context(usize),
     System(crate::commands::SystemCommand),
     Utility(crate::commands::UtilityCommand),
     App(usize),

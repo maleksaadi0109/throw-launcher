@@ -4,6 +4,7 @@ use std::{
     collections::{HashSet, VecDeque},
     mem::{size_of, zeroed},
     path::{Path, PathBuf},
+    ptr::null_mut,
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc::{self, Receiver, SyncSender, TrySendError},
@@ -34,6 +35,11 @@ impl Drop for OwnedIcon {
 fn extract(path: &Path) -> Option<OwnedIcon> {
     // Shell APIs are stricter about separators than ordinary Win32 file APIs.
     let normalized: PathBuf = path.components().collect();
+    // Ask the Shell for a real 64px icon instead of enlarging its 32px list icon.
+    // Runs on the existing COM worker; the bounded cache and UI paint stay small.
+    if let Some(icon) = unsafe { extract_high_resolution(&normalized) } {
+        return Some(icon);
+    }
     let mut info: SHFILEINFOW = unsafe { zeroed() };
     let result = unsafe {
         SHGetFileInfoW(
@@ -54,6 +60,53 @@ fn extract(path: &Path) -> Option<OwnedIcon> {
         }
         None
     }
+}
+
+unsafe fn extract_high_resolution(path: &Path) -> Option<OwnedIcon> {
+    use ::windows::{
+        core::PCWSTR,
+        Win32::{
+            Foundation::SIZE,
+            UI::Shell::{IShellItemImageFactory, SHCreateItemFromParsingName, SIIGBF_ICONONLY},
+        },
+    };
+    use windows_sys::Win32::Graphics::Gdi::*;
+    let factory: IShellItemImageFactory =
+        SHCreateItemFromParsingName(PCWSTR(wide(path).as_ptr()), None).ok()?;
+    let bitmap = factory
+        .GetImage(SIZE { cx: 64, cy: 64 }, SIIGBF_ICONONLY)
+        .ok()?;
+    let color = bitmap.0 as HBITMAP;
+    let mut details: BITMAP = zeroed();
+    if GetObjectW(
+        color,
+        size_of::<BITMAP>() as i32,
+        (&mut details as *mut BITMAP).cast(),
+    ) == 0
+    {
+        DeleteObject(color);
+        return None;
+    }
+    let width = details.bmWidth.clamp(1, 256);
+    let height = details.bmHeight.abs().clamp(1, 256);
+    let zero_mask = vec![0u8; (((width + 15) / 16) * 2 * height) as usize];
+    let mask = CreateBitmap(width, height, 1, 1, zero_mask.as_ptr().cast());
+    let icon = if mask.is_null() {
+        null_mut()
+    } else {
+        CreateIconIndirect(&ICONINFO {
+            fIcon: 1,
+            xHotspot: 0,
+            yHotspot: 0,
+            hbmMask: mask,
+            hbmColor: color,
+        })
+    };
+    if !mask.is_null() {
+        DeleteObject(mask);
+    }
+    DeleteObject(color);
+    (!icon.is_null()).then_some(OwnedIcon(icon as usize))
 }
 
 struct Store {

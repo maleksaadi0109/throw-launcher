@@ -3,29 +3,6 @@ fn main() {
     #[cfg(windows)]
     {
         let mut resource = winresource::WindowsResource::new();
-        for (index, name) in [
-            "restart",
-            "shutdown",
-            "restart_advanced",
-            "logoff",
-            "lock",
-            "sleep",
-            "hibernate",
-            "recyclebin",
-            "openrecyclebin",
-            "indexoption",
-            "checkupdate",
-            "theme_selector",
-            "app",
-            "close",
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            let path = format!("branding/commands/{name}.ico");
-            println!("cargo:rerun-if-changed={path}");
-            resource.set_icon_with_id(&path, &(100 + index).to_string());
-        }
         resource
             .set_icon("branding/throw-rust.ico")
             .set("ProductName", "Throw Launcher")

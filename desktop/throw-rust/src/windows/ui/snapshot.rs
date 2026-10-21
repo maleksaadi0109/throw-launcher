@@ -1,5 +1,6 @@
 //! Native Windows visual smoke evidence. Only invoked with --smoke-test.
 use super::*;
+mod context_smoke;
 mod settings_smoke;
 use std::{
     path::Path,
@@ -25,30 +26,10 @@ pub(super) unsafe fn verify_and_capture(root: &Path) -> Result<(), String> {
     verify_edit_shortcuts()?;
     verify_folders_and_scroll(root)?;
     verify_command_palette()?;
-    APP.with(|cell| {
-        let slot = cell.borrow();
-        let app = slot.as_ref().unwrap();
-        for id in 100usize..=113 {
-            let icon = LoadImageW(
-                app.instance,
-                id as *const u16,
-                IMAGE_ICON,
-                32,
-                32,
-                LR_SHARED,
-            );
-            if icon.is_null() {
-                return Err(format!("Embedded Flow command icon {id} is missing."));
-            }
-        }
-        Ok(())
-    })?;
     super::web_smoke::verify(root)?;
-    let menu = actions::build_menu();
-    if menu.is_null() || GetMenuItemCount(menu) != 7 {
+    if actions::rows(false, "").len() != 7 {
         return Err("Result action menu is incomplete.".into());
     }
-    DestroyMenu(menu);
     let deadline = Instant::now() + Duration::from_secs(8);
     loop {
         let mut msg: MSG = zeroed();
@@ -109,6 +90,7 @@ pub(super) unsafe fn verify_and_capture(root: &Path) -> Result<(), String> {
         .ok_or("Missing executable directory")?
         .to_path_buf();
     settings_smoke::verify_and_capture(root, &output)?;
+    context_smoke::verify(&output)?;
     RedrawWindow(
         hwnd,
         null(),
@@ -362,11 +344,9 @@ unsafe fn verify_folders_and_scroll(root: &Path) -> Result<(), String> {
     }
     SendMessageW(list, LB_SETTOPINDEX, 0, 0);
     SendMessageW(list, LB_SETCURSEL, 0, 0);
-    let menu = actions::build_menu_for(true);
-    if menu.is_null() || GetMenuItemCount(menu) != 4 {
+    if actions::rows(true, "").len() != 4 {
         return Err("Folder context menu is incomplete.".into());
     }
-    DestroyMenu(menu);
     Ok(())
 }
 

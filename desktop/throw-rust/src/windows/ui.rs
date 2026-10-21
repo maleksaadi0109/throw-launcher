@@ -114,6 +114,7 @@ struct App {
     reindex_again: bool,
     portable: bool,
     popup: bool,
+    context: Option<actions::Panel>,
     file_worker: Option<Receiver<(String, Result<Vec<FileEntry>, String>)>>,
     file_query: String,
     file_entries: Vec<FileEntry>,
@@ -350,6 +351,10 @@ impl App {
     }
 
     unsafe fn refresh(&mut self) {
+        if self.context.is_some() {
+            self.refresh_context();
+            return;
+        }
         // Owner-draw callbacks must not paint while App is mutably borrowed.
         // Batch list/geometry changes, then invalidate for the next message turn.
         SendMessageW(self.list, WM_SETREDRAW, 0, 0);
@@ -471,7 +476,7 @@ impl App {
         let work = placement::work_area(self.hwnd);
         let mut rect: RECT = zeroed();
         GetWindowRect(self.hwnd, &mut rect);
-        let rows = 3;
+        let rows = if self.context.is_some() { 5 } else { 3 };
         let mut size = RECT {
             left: 0,
             top: 0,
@@ -508,7 +513,12 @@ impl App {
         // Capture the user's active window BEFORE activating Throw. Using the
         // launcher's previous position would reopen it on the wrong monitor.
         let work = placement::work_area(GetForegroundWindow());
-        let bounds = placement::centered(work, self.px(640), self.px(352), self.px(12));
+        let bounds = placement::centered(
+            work,
+            self.px(640),
+            self.px(if self.context.is_some() { 480 } else { 352 }),
+            self.px(12),
+        );
         SetWindowPos(
             self.hwnd,
             null_mut(),
@@ -595,7 +605,12 @@ impl App {
         }
         SendMessageW(self.list, LB_SETITEMHEIGHT, 0, self.px(64) as isize);
         let work = placement::work_area(self.hwnd);
-        let bounds = placement::centered(work, self.px(640), self.px(352), self.px(12));
+        let bounds = placement::centered(
+            work,
+            self.px(640),
+            self.px(if self.context.is_some() { 480 } else { 352 }),
+            self.px(12),
+        );
         SetWindowPos(
             self.hwnd,
             null_mut(),
@@ -803,7 +818,12 @@ impl App {
         let Some(row) = self.rows.get(selected as usize).cloned() else {
             return;
         };
+        if let Action::Context(id) = row.action {
+            actions::perform(self, id);
+            return;
+        }
         let result = match row.action {
+            Action::Context(_) => unreachable!(),
             Action::File(path) => {
                 validate_file(&path).and_then(|_| open(self.hwnd, path.as_os_str()))
             }
@@ -1177,7 +1197,13 @@ impl App {
                     }
                     SEARCH if event == EN_CHANGE => self.refresh(),
                     RESULTS if event == LBN_DBLCLK => self.activate(),
-                    SETTINGS_BUTTON => self.show_settings(),
+                    SETTINGS_BUTTON => {
+                        if self.context.is_some() {
+                            self.close_context();
+                        } else {
+                            self.show_settings();
+                        }
+                    }
                     SAVE => {
                         if let Err(e) = self.save_settings() {
                             self.settings_notice(&e, true);
@@ -1505,7 +1531,11 @@ unsafe extern "system" fn edit_proc(
                         if w == VK_RETURN as usize {
                             app.activate();
                         } else if w == VK_ESCAPE as usize {
-                            ShowWindow(app.hwnd, SW_HIDE);
+                            if app.context.is_some() {
+                                app.close_context();
+                            } else {
+                                ShowWindow(app.hwnd, SW_HIDE);
+                            }
                         } else {
                             let current = SendMessageW(app.list, LB_GETCURSEL, 0, 0);
                             let max = app.rows.len().saturating_sub(1) as isize;
@@ -1758,6 +1788,7 @@ unsafe fn run_native() -> Result<(), String> {
         reindex_again: false,
         portable,
         popup: false,
+        context: None,
     };
     app.rebuild_brushes();
     let mut work: RECT = zeroed();
