@@ -72,6 +72,7 @@ struct App {
     entries: Vec<Entry>,
     rows: Vec<ResultRow>,
     worker: Option<Receiver<Result<Scan, String>>>,
+    reindex_again: bool,
     portable: bool,
     popup: bool,
 }
@@ -175,6 +176,7 @@ impl App {
             WS_TABSTOP
                 | WS_VSCROLL
                 | LBS_NOTIFY as u32
+                | LBS_HASSTRINGS as u32
                 | LBS_OWNERDRAWFIXED as u32
                 | LBS_NOINTEGRALHEIGHT as u32,
             [24, 146, 656, 352],
@@ -258,11 +260,18 @@ impl App {
 
     unsafe fn reindex(&mut self) {
         if self.worker.is_some() {
+            self.reindex_again = true;
             return;
         }
+        let roots = match app_roots() {
+            Ok(roots) => roots,
+            Err(error) => {
+                self.set_status(&error);
+                return;
+            }
+        };
         self.set_status("Refreshing app index in the background...");
         let (sender, receiver) = mpsc::channel();
-        let roots = app_roots();
         let limit = self.limit();
         let cache = self.root.join("apps.json");
         let hwnd = self.hwnd as usize;
@@ -288,7 +297,9 @@ impl App {
             .take()
             .and_then(|receiver| receiver.try_recv().ok());
         match result {
-            Some(Ok(scan)) => {
+            Some(Ok(mut scan)) => {
+                // Settings may have changed while the background scan ran.
+                scan.entries.truncate(self.limit());
                 self.entries = scan.entries;
                 self.refresh();
                 if scan.unreadable > 0 || scan.truncated {
@@ -312,6 +323,10 @@ impl App {
                     "App index worker did not return a result. Try > Rebuild app index.",
                 );
             }
+        }
+        if self.reindex_again {
+            self.reindex_again = false;
+            self.reindex();
         }
     }
 
@@ -415,6 +430,15 @@ impl App {
             0,
             [24, 57, 600, 25],
         );
+        let startup = match startup_enabled() {
+            Ok(enabled) => enabled,
+            Err(error) => {
+                message(parent, &error, true);
+                DestroyWindow(parent);
+                self.settings_hwnd = null_mut();
+                return;
+            }
+        };
         for (id, label, checked, y) in [
             (
                 LITE,
@@ -452,12 +476,7 @@ impl App {
                 self.settings.remember_history,
                 271,
             ),
-            (
-                STARTUP,
-                "Launch at Windows sign-in",
-                startup_enabled().unwrap_or(false),
-                305,
-            ),
+            (STARTUP, "Launch at Windows sign-in", startup, 305),
         ] {
             let control = self.control(
                 parent,
@@ -1065,6 +1084,7 @@ pub fn run() -> Result<(), String> {
 }
 
 unsafe fn run_native() -> Result<(), String> {
+    let _shell = ShellApartment::initialize()?;
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args
         .iter()
@@ -1168,6 +1188,7 @@ unsafe fn run_native() -> Result<(), String> {
         entries: vec![],
         rows: vec![],
         worker: None,
+        reindex_again: false,
         portable,
         popup: false,
     };

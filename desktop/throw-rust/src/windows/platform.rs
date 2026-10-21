@@ -11,7 +11,7 @@ use throw_launcher::{
 };
 use windows_sys::Win32::{
     Foundation::*,
-    System::{DataExchange::*, Memory::*, ProcessStatus::*, Registry::*, Threading::*},
+    System::{Com::*, DataExchange::*, Memory::*, ProcessStatus::*, Registry::*, Threading::*},
     UI::{Controls::Dialogs::*, Shell::*, WindowsAndMessaging::*},
 };
 
@@ -34,19 +34,60 @@ pub fn profile(portable: bool) -> Result<PathBuf, String> {
     Ok(root)
 }
 
-pub fn app_roots() -> Vec<PathBuf> {
-    let mut roots = Vec::new();
-    for (key, suffix) in [
-        ("APPDATA", r"Microsoft\Windows\Start Menu\Programs"),
-        ("PROGRAMDATA", r"Microsoft\Windows\Start Menu\Programs"),
-        ("USERPROFILE", "Desktop"),
-        ("PUBLIC", "Desktop"),
-    ] {
-        if let Some(root) = std::env::var_os(key) {
-            roots.push(PathBuf::from(root).join(suffix));
+pub struct ShellApartment;
+impl ShellApartment {
+    pub unsafe fn initialize() -> Result<Self, String> {
+        let status = CoInitializeEx(
+            null(),
+            (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) as u32,
+        );
+        if status < 0 {
+            Err(format!("Cannot initialize Windows Shell ({status:#x})."))
+        } else {
+            Ok(Self)
         }
     }
-    roots
+}
+impl Drop for ShellApartment {
+    fn drop(&mut self) {
+        unsafe {
+            CoUninitialize();
+        }
+    }
+}
+
+pub fn app_roots() -> Result<Vec<PathBuf>, String> {
+    use std::os::windows::ffi::OsStringExt;
+    let mut roots = Vec::new();
+    for (id, name) in [
+        (FOLDERID_Programs, "user Start menu"),
+        (FOLDERID_CommonPrograms, "shared Start menu"),
+        (FOLDERID_Desktop, "Desktop"),
+        (FOLDERID_PublicDesktop, "public Desktop"),
+    ] {
+        unsafe {
+            let mut pointer = null_mut();
+            let status =
+                SHGetKnownFolderPath(&id, KF_FLAG_DONT_VERIFY as u32, null_mut(), &mut pointer);
+            if status < 0 || pointer.is_null() {
+                return Err(format!("Cannot locate {name} ({status:#x})."));
+            }
+            let mut length = 0;
+            while length < 32768 && *pointer.add(length) != 0 {
+                length += 1;
+            }
+            let path = if length < 32768 {
+                Some(PathBuf::from(std::ffi::OsString::from_wide(
+                    std::slice::from_raw_parts(pointer, length),
+                )))
+            } else {
+                None
+            };
+            CoTaskMemFree(pointer.cast());
+            roots.push(path.ok_or("Known folder path exceeds Windows limits.")?);
+        }
+    }
+    Ok(roots)
 }
 
 pub fn load_index(path: &Path, limit: usize) -> Result<Vec<Entry>, String> {

@@ -6,7 +6,11 @@ mod windows;
 fn main() {
     #[cfg(windows)]
     if let Err(error) = windows::run() {
-        windows::show_error(&error);
+        if std::env::args().any(|arg| arg == "--smoke-test") {
+            let _ = std::fs::write("smoke-error.txt", &error);
+        } else {
+            windows::show_error(&error);
+        }
         std::process::exit(1);
     }
     #[cfg(not(windows))]

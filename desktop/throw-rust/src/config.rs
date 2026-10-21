@@ -179,10 +179,33 @@ pub fn import_preferences(bytes: &[u8], settings: &mut Settings) -> Result<(), S
     if bytes.len() > 1024 * 1024 {
         return Err("Import exceeds 1 MB.".into());
     }
-    let value: serde_json::Value = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
-    let object = value
-        .as_object()
-        .ok_or("Expected a JSON settings object.")?;
+    // Accept Flow's additional fields, but reject ambiguous duplicate root keys.
+    struct UniqueObject(BTreeMap<String, serde_json::Value>);
+    impl<'de> Deserialize<'de> for UniqueObject {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            struct Visitor;
+            impl<'de> serde::de::Visitor<'de> for Visitor {
+                type Value = UniqueObject;
+                fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                    formatter.write_str("a settings object without duplicate keys")
+                }
+                fn visit_map<M: serde::de::MapAccess<'de>>(
+                    self,
+                    mut map: M,
+                ) -> Result<Self::Value, M::Error> {
+                    let mut object = BTreeMap::new();
+                    while let Some((key, value)) = map.next_entry::<String, serde_json::Value>()? {
+                        if object.insert(key, value).is_some() {
+                            return Err(serde::de::Error::custom("Duplicate import key"));
+                        }
+                    }
+                    Ok(UniqueObject(object))
+                }
+            }
+            deserializer.deserialize_map(Visitor)
+        }
+    }
+    let UniqueObject(object) = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
     let mut next = settings.clone();
     let mut count = 0;
     for (name, target) in [
@@ -247,6 +270,9 @@ mod tests {
         assert_eq!(s, before);
         assert!(import_preferences(b"[]", &mut s).is_err());
         assert!(import_preferences(b"{}", &mut s).is_err());
+        assert!(
+            import_preferences(br#"{"HideOnStartup":true,"HideOnStartup":false}"#, &mut s).is_err()
+        );
     }
     #[test]
     fn settings_roundtrip_and_bounded_read() {

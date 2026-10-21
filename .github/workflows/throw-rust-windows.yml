@@ -38,7 +38,10 @@ jobs:
             $process.Kill()
             throw "Native smoke test timed out"
           }
-          if ($process.ExitCode -ne 0) { throw "Native smoke test failed: $($process.ExitCode)" }
+          if ($process.ExitCode -ne 0) {
+            if (Test-Path smoke-error.txt) { Get-Content smoke-error.txt }
+            throw "Native smoke test failed: $($process.ExitCode)"
+          }
           if (-not (Test-Path ./target/release/smoke-result.txt)) { throw "No runtime evidence produced" }
           Get-Content ./target/release/smoke-result.txt
       - name: Package Rust preview
