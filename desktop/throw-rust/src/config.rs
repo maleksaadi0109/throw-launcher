@@ -89,6 +89,11 @@ impl Settings {
         let bytes = read_bounded(path, MAX_SETTINGS_BYTES).map_err(|e| e.to_string())?;
         let mut settings: Self =
             serde_json::from_slice(&bytes).map_err(|e| format!("Invalid settings: {e}"))?;
+        // Move users of the untouched built-in provider to the new default,
+        // while preserving any provider configuration they customized.
+        if settings.web_providers == crate::web::previous_defaults() {
+            settings.web_providers = crate::web::defaults();
+        }
         settings.validate()?;
         // Older releases used this as the visible-row count. It now caps the
         // scrollable search list; the viewport is always three rows.
@@ -316,6 +321,37 @@ mod tests {
         assert!(!old.bookmarks && !old.web_search && old.lite);
         assert_eq!(old.web_providers, crate::web::defaults());
         assert!(serde_json::from_str::<Settings>(r#"{"web_providers":[{"name":"X","keyword":"x","template":"https://a/{query}","enabled":true,"command":"evil"}]}"#).is_err());
+        let root = std::env::temp_dir().join(format!(
+            "throw-provider-migrate-test-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("settings.json");
+        fs::write(
+            &path,
+            br#"{"version":1,"web_providers":[{"name":"DuckDuckGo","keyword":"?","template":"https://duckduckgo.com/?q={query}","enabled":true}]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            Settings::load(&path).unwrap().web_providers,
+            crate::web::defaults()
+        );
+        fs::write(
+            &path,
+            br#"{"version":1,"web_providers":[{"name":"DuckDuckGo","keyword":"?","template":"https://duckduckgo.com/?q={query}","enabled":false}]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            Settings::load(&path).unwrap().web_providers,
+            crate::web::previous_defaults()
+                .into_iter()
+                .map(|mut provider| {
+                    provider.enabled = false;
+                    provider
+                })
+                .collect::<Vec<_>>()
+        );
+        fs::remove_dir_all(root).unwrap();
         let root =
             std::env::temp_dir().join(format!("throw-web-config-test-{}", std::process::id()));
         let path = root.join("settings.json");
