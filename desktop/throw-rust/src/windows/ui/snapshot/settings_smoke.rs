@@ -18,6 +18,26 @@ pub(super) unsafe fn verify_and_capture(root: &Path, output: &Path) -> Result<()
         return Err("Settings failed to open.".into());
     }
     verify_settings_bounds(parent)?;
+    let browser = GetDlgItem(parent, DIRECT_BROWSER as i32);
+    if browser.is_null()
+        || SendMessageW(browser, CB_GETCOUNT, 0, 0) != 2
+        || SendMessageW(browser, CB_GETCURSEL, 0, 0) != 0
+    {
+        return Err("Direct URL browser choices or Windows default selection are missing.".into());
+    }
+    SendMessageW(browser, CB_SETCURSEL, 1, 0);
+    let browser_draft = APP.with(|cell| {
+        let slot = cell.borrow();
+        let app = slot.as_ref().unwrap();
+        app.settings_dirty()
+            && app.settings.direct_link_browser == Browser::WindowsDefault
+            && app
+                .settings_draft()
+                .is_ok_and(|s| s.direct_link_browser == Browser::Chrome)
+    });
+    if !browser_draft {
+        return Err("Browser selection did not stay in an unsaved draft.".into());
+    }
     // WM_PAINT and WM_PRINTCLIENT must be independent of APP: native window
     // painting can occur synchronously while the UI owns its mutable borrow.
     APP.with(|cell| {
@@ -99,6 +119,7 @@ pub(super) unsafe fn verify_and_capture(root: &Path, output: &Path) -> Result<()
                 && SendMessageW(GetDlgItem(parent, THEME as i32), CB_GETCURSEL, 0, 0)
                     == expected as isize
                 && SendMessageW(limit, CB_GETCURSEL, 0, 0) == 2
+                && SendMessageW(browser, CB_GETCURSEL, 0, 0) == 1
                 && app.settings_dirty()
         });
         if !okay {
@@ -112,6 +133,7 @@ pub(super) unsafe fn verify_and_capture(root: &Path, output: &Path) -> Result<()
         let app = slot.as_mut().unwrap();
         app.save_settings()?;
         if app.settings.max_results != 100
+            || app.settings.direct_link_browser != Browser::Chrome
             || app.settings_dirty()
             || Settings::load(&root.join("settings.json"))? != app.settings
         {
@@ -120,6 +142,7 @@ pub(super) unsafe fn verify_and_capture(root: &Path, output: &Path) -> Result<()
         // Fail the write without changing startup registration or global hotkeys.
         let original = app.settings.clone();
         SendMessageW(limit, CB_SETCURSEL, 0, 0);
+        SendMessageW(browser, CB_SETCURSEL, 0, 0);
         let blocked = root.join("blocked-profile");
         std::fs::write(&blocked, b"not a directory").map_err(|e| e.to_string())?;
         app.root = blocked;
@@ -129,10 +152,18 @@ pub(super) unsafe fn verify_and_capture(root: &Path, output: &Path) -> Result<()
             || app.settings != original
             || !app.settings_dirty()
             || SendMessageW(limit, CB_GETCURSEL, 0, 0) != 0
+            || SendMessageW(browser, CB_GETCURSEL, 0, 0) != 0
         {
             return Err("A failed save lost the draft or changed live settings.".into());
         }
         SendMessageW(limit, CB_SETCURSEL, 2, 0);
+        app.save_settings()?;
+        if app.settings.direct_link_browser != Browser::WindowsDefault
+            || app.settings_dirty()
+            || Settings::load(&root.join("settings.json"))? != app.settings
+        {
+            return Err("Switching back to Windows default did not persist.".into());
+        }
         Ok::<_, String>(())
     })?;
     // Ctrl+number and Ctrl+S use the actual live pre-translation path.

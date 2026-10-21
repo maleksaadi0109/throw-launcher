@@ -85,6 +85,12 @@ for your PC, app collection, or search index.
 Open **Settings** from the launcher or tray menu. Preferences live in
 `%APPDATA%\ThrowLauncherRust`.
 
+In **General → Browser for direct URLs**, choose **Windows default** (the
+default) or **Google Chrome**. This only changes how typed HTTP(S) links open,
+including their **Open in browser** action. Web searches, bookmarks, and file
+actions still use their existing behavior. If Chrome is unavailable, Throw
+shows an error; choose Windows default to use another browser.
+
 Upgrades keep existing preferences unless you explicitly select **Apply the
 preferences below** in setup. Startup and shortcut choices remain visible in
 the installer. Uninstall through Windows **Installed apps → Throw Launcher**.

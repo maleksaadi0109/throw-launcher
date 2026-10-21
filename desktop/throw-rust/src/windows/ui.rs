@@ -22,7 +22,7 @@ use std::{
 };
 use throw_launcher::{
     bookmarks::{self, Bookmark},
-    config::{import_preferences, read_bounded, Hotkey, Settings, Theme},
+    config::{import_preferences, read_bounded, Browser, Hotkey, Settings, Theme},
     files::{self, FileEntry},
     folders::{self, Folder},
     index::{self, Entry, Scan, LITE_INDEX_LIMIT, STANDARD_INDEX_LIMIT},
@@ -68,6 +68,7 @@ const HOTKEY: usize = 320;
 const THEME: usize = 321;
 const LIMIT: usize = 322;
 const WEB_MANAGER: usize = 323;
+const DIRECT_BROWSER: usize = 324;
 
 thread_local! {
     static APP: RefCell<Option<App>> = const { RefCell::new(None) };
@@ -903,6 +904,9 @@ impl App {
                 } else {
                     open(self.hwnd, std::ffi::OsStr::new(&url))
                 }
+            }
+            Action::DirectUrl(url) => {
+                open_direct_url(self.hwnd, &url, self.settings.direct_link_browser)
             }
             Action::Copy(value) => copy_text(self.hwnd, &value),
             Action::Settings => {

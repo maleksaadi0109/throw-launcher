@@ -1,0 +1,1 @@
+- [Browser and provider choices](browser-provider-choices.md) — keep direct-link browser preferences separate from keyword search-provider choices.
