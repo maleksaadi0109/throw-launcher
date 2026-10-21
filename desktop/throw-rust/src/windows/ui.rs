@@ -567,6 +567,48 @@ impl App {
             return;
         };
         let result = match row.action {
+            Action::System(command) => {
+                if !super::system_actions::confirm(self.hwnd, command) {
+                    self.set_status("Cancelled — no system action was performed.");
+                    return;
+                }
+                super::system_actions::execute(self.hwnd, command, true)
+            }
+            Action::Utility(command) => {
+                use throw_launcher::commands::UtilityCommand::*;
+                match command {
+                    MeasureMemory => {
+                        match memory_report() {
+                            Ok(report) => message(self.hwnd, &report, false),
+                            Err(error) => message(self.hwnd, &error, true),
+                        }
+                        return;
+                    }
+                    LightTheme | DarkTheme => {
+                        let mut next = self.settings.clone();
+                        next.theme = if command == LightTheme {
+                            Theme::Light
+                        } else {
+                            Theme::Ink
+                        };
+                        if let Err(error) = next.save(&self.root.join("settings.json")) {
+                            message(self.hwnd, &error, true);
+                        } else {
+                            self.settings = next;
+                            self.rebuild_brushes();
+                            RedrawWindow(
+                                self.hwnd,
+                                null(),
+                                null_mut(),
+                                RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN,
+                            );
+                            self.set_status("Appearance saved.");
+                        }
+                        return;
+                    }
+                    _ => super::system_actions::utility(self.hwnd, command, &self.root),
+                }
+            }
             Action::Folder(path) => {
                 if Folder::new(path.clone()).is_none() || !path.is_dir() {
                     Err("This folder is unavailable or no longer exists.".into())

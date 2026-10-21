@@ -1,8 +1,58 @@
-//! Quiet, keyboard-first launcher drawing. GDI only: no decoding, blur or per-row assets.
+//! An integrated search header and quiet, keyboard-first result shelf.
+//! GDI only: no decoding, blur, per-row assets or synthetic controls.
 use super::*;
 
 // COLORREF values: a restrained, slightly desaturated Spotlight blue.
 const ACCENT: u32 = 0x00A77A4B;
+
+fn hairline(app: &App) -> u32 {
+    if app.settings.theme == Theme::Ink {
+        rgb(58, 61, 69)
+    } else {
+        rgb(223, 226, 232)
+    }
+}
+
+unsafe fn rule(dc: HDC, left: i32, right: i32, y: i32, color: u32) {
+    let pen = CreatePen(PS_SOLID, 1, color);
+    let old = SelectObject(dc, pen);
+    MoveToEx(dc, left, y, null_mut());
+    LineTo(dc, right, y);
+    SelectObject(dc, old);
+    DeleteObject(pen);
+}
+
+// Reads only: never install placeholder text in the native EDIT or disturb undo.
+unsafe fn query_scope(app: &App) -> &'static str {
+    let mut value = [0u16; 513];
+    let len = GetWindowTextW(app.edit, value.as_mut_ptr(), value.len() as i32);
+    let query = String::from_utf16_lossy(&value[..len.max(0) as usize]);
+    match query.trim_start().chars().next() {
+        Some('>') => "Commands",
+        Some('=') => "Calculator",
+        Some('?') => "Web search",
+        _ => "Search anything",
+    }
+}
+
+unsafe fn command_mark(dc: HDC, tile: RECT, scale: i32, color: u32) {
+    let pen = CreatePen(PS_SOLID, (scale / 16).max(1), color);
+    let old = SelectObject(dc, pen);
+    let x = tile.left + scale / 4;
+    let y = tile.top + scale / 3;
+    MoveToEx(dc, x, y, null_mut());
+    LineTo(dc, x + scale / 5, tile.top + scale / 2);
+    LineTo(dc, x, tile.top + scale * 2 / 3);
+    MoveToEx(
+        dc,
+        tile.left + scale / 2,
+        tile.top + scale * 2 / 3,
+        null_mut(),
+    );
+    LineTo(dc, tile.left + scale * 3 / 4, tile.top + scale * 2 / 3);
+    SelectObject(dc, old);
+    DeleteObject(pen);
+}
 
 unsafe fn text(dc: HDC, value: &str, mut rect: RECT, color: u32, flags: u32) {
     SetTextColor(dc, color);
@@ -101,34 +151,31 @@ pub(super) unsafe fn paint(app: &App, hwnd: HWND) {
     if hwnd == app.hwnd {
         let p = |n| app.px(n);
 
-        // The inset panel is the only elevated surface; the edit remains a native
-        // child control aligned to the same generous 16/32px rhythm.
-        let search_box = RECT {
-            left: p(16),
-            top: p(16),
-            right: client.right - p(16),
+        // One continuous search surface, rather than a form field inside a card.
+        // It uses the EDIT's own brush, so the native caret/text area disappears
+        // into the header. Child geometry and the three-row list stay untouched.
+        let search_surface = RECT {
+            left: 0,
+            top: 0,
+            right: client.right,
             bottom: p(80),
         };
-        rounded(
-            dc,
-            search_box,
-            app.field,
-            p(15),
-            (GetFocus() == app.edit).then_some(ACCENT),
-        );
+        FillRect(dc, &search_surface, app.field);
+        rule(dc, p(20), client.right - p(20), p(80), hairline(app));
         magnifier(dc, client.right - p(41), p(48), p(19));
 
+        let scope = query_scope(app);
         SelectObject(dc, app.font);
         text(
             dc,
-            "Applications & folders",
+            scope,
             RECT {
                 left: p(20),
                 top: p(88),
                 right: client.right - p(150),
                 bottom: p(112),
             },
-            app.text_color(),
+            app.muted(),
             DT_LEFT | DT_VCENTER,
         );
 
@@ -156,13 +203,29 @@ pub(super) unsafe fn paint(app: &App, hwnd: HWND) {
             );
         }
 
-        // Leave room for the native index/mode status control at the lower left.
-        // At compact widths it disappears rather than colliding with that text.
-        if client.right >= p(600) {
+        // Separate the result shelf from the low-priority native status strip.
+        rule(
+            dc,
+            p(20),
+            client.right - p(20),
+            client.bottom - p(36),
+            hairline(app),
+        );
+        // Status ends at width - 400; these hints live entirely to its right.
+        if client.right >= p(520) {
+            let selected = SendMessageW(app.list, LB_GETCURSEL, 0, 0);
+            let verb = app
+                .rows
+                .get(selected as usize)
+                .map_or("Open", |row| match &row.action {
+                    Action::Copy(_) => "Copy",
+                    Action::App(_) | Action::Folder(_) | Action::Url(_) => "Open",
+                    _ => "Run",
+                });
             SelectObject(dc, app.small_font);
             text(
                 dc,
-                "↑↓ Navigate    ↵ Open    Esc Hide",
+                &format!("↑↓ Navigate    ↵ {verb}    Esc Hide"),
                 RECT {
                     left: client.right - p(390),
                     top: client.bottom - p(30),
@@ -182,7 +245,7 @@ pub(super) unsafe fn paint(app: &App, hwnd: HWND) {
                 if app.worker.is_some() {
                     "Finding apps and folders…"
                 } else {
-                    "No apps or folders found"
+                    "No matching results"
                 },
                 RECT {
                     left: p(30),
@@ -196,7 +259,11 @@ pub(super) unsafe fn paint(app: &App, hwnd: HWND) {
             SelectObject(dc, app.small_font);
             text(
                 dc,
-                "Search by name, = calculate, ? search the web, or > commands",
+                if scope == "Commands" {
+                    "Try > settings or > to browse commands"
+                } else {
+                    "Apps & folders  ·  = calculate  ·  ? web  ·  > commands"
+                },
                 RECT {
                     left: p(30),
                     top: center + p(5),
@@ -240,8 +307,12 @@ pub(super) unsafe fn draw_row(app: &App, item: &DRAWITEMSTRUCT) {
         } else {
             app.background
         },
-        p(12),
-        None,
+        p(10),
+        selected.then_some(if app.settings.theme == Theme::Ink {
+            rgb(65, 79, 101)
+        } else {
+            rgb(214, 224, 240)
+        }),
     );
 
     let icon_x = item.rcItem.left + p(18);
@@ -296,18 +367,25 @@ pub(super) unsafe fn draw_row(app: &App, item: &DRAWITEMSTRUCT) {
                 icon_size,
                 if selected { ACCENT } else { app.muted() },
             ),
-            _ => {
+            Action::Copy(_)
+            | Action::Url(_)
+            | Action::Settings
+            | Action::Reindex
+            | Action::Quit => {
                 let glyph = match row.action {
                     Action::Copy(_) => "=",
                     Action::Url(_) => "↗",
-                    Action::Settings => "S",
+                    Action::Settings => "≡",
                     Action::Reindex => "↻",
                     Action::Quit => "×",
-                    _ => "·",
+                    _ => unreachable!(),
                 };
                 SelectObject(dc, app.input_font);
                 text(dc, glyph, tile, ACCENT, DT_CENTER | DT_VCENTER);
             }
+            // System and Utility commands (and future command kinds) get a
+            // crisp terminal mark without depending on icon fonts or assets.
+            _ => command_mark(dc, tile, icon_size, ACCENT),
         }
     }
 
@@ -325,7 +403,10 @@ pub(super) unsafe fn draw_row(app: &App, item: &DRAWITEMSTRUCT) {
             right: hint_right,
             bottom: item.rcItem.top + p(44),
         };
-        rounded(dc, keycap, app.field, p(7), None);
+        // Shortcut labels are quiet annotations, not a second set of buttons.
+        if selected {
+            rounded(dc, keycap, app.field, p(6), None);
+        }
         SelectObject(dc, app.small_font);
         text(
             dc,
@@ -377,9 +458,9 @@ pub(super) unsafe fn draw_settings_button(app: &App, item: &DRAWITEMSTRUCT) {
         if item.itemState & ODS_SELECTED != 0 {
             app.selected
         } else {
-            app.field
+            app.background
         },
-        app.px(8),
+        app.px(6),
         (item.itemState & ODS_FOCUS != 0).then_some(ACCENT),
     );
     SelectObject(item.hDC, app.small_font);
@@ -387,7 +468,7 @@ pub(super) unsafe fn draw_settings_button(app: &App, item: &DRAWITEMSTRUCT) {
         item.hDC,
         "Settings",
         rect,
-        app.text_color(),
+        app.muted(),
         DT_CENTER | DT_VCENTER,
     );
     RestoreDC(item.hDC, saved);
@@ -402,14 +483,17 @@ pub(super) unsafe fn draw_search_hint(app: &App, edit: HWND) {
     let mut rect: RECT = zeroed();
     GetClientRect(edit, &mut rect);
     rect.left += app.px(2);
-    SelectObject(dc, app.input_font);
-    text(
-        dc,
-        "Search apps or folders, = calculate, ? search web",
-        rect,
-        app.muted(),
-        DT_LEFT | DT_VCENTER,
-    );
+    // Use the normal text face for discovery copy; the typed query retains the
+    // larger input_font. Choose shorter wording instead of a crowded ellipsis.
+    SelectObject(dc, app.font);
+    let hint = if rect.right - rect.left >= app.px(490) {
+        "Apps & folders  ·  = calculate  ·  ? web  ·  > commands"
+    } else if rect.right - rect.left >= app.px(390) {
+        "Apps, folders  ·  = calc  ·  ? web  ·  > commands"
+    } else {
+        "Search anything  ·  > commands"
+    };
+    text(dc, hint, rect, app.muted(), DT_LEFT | DT_VCENTER);
     RestoreDC(dc, saved);
     ReleaseDC(edit, dc);
 }

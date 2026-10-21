@@ -8,6 +8,7 @@ use std::{
 pub(super) unsafe fn verify_and_capture(root: &Path) -> Result<(), String> {
     verify_edit_shortcuts()?;
     verify_folders_and_scroll(root)?;
+    verify_command_palette()?;
     let menu = actions::build_menu();
     if menu.is_null() || GetMenuItemCount(menu) != 7 {
         return Err("Result action menu is incomplete.".into());
@@ -92,6 +93,18 @@ pub(super) unsafe fn verify_and_capture(root: &Path) -> Result<(), String> {
         RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN,
     );
     capture(hwnd, &output.join("throw-paper.bmp"))?;
+    let edit = APP.with(|cell| cell.borrow().as_ref().unwrap().edit);
+    SetWindowTextW(edit, wide(">").as_ptr());
+    settle();
+    RedrawWindow(
+        hwnd,
+        null(),
+        null_mut(),
+        RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN,
+    );
+    capture(hwnd, &output.join("throw-commands.bmp"))?;
+    SetWindowTextW(edit, wide("").as_ptr());
+    settle();
     let count = APP.with(|cell| {
         cell.borrow()
             .as_ref()
@@ -104,7 +117,7 @@ pub(super) unsafe fn verify_and_capture(root: &Path) -> Result<(), String> {
     if count > 48 {
         return Err("Lite icon cache exceeded its bound.".into());
     }
-    let report = format!("{}\nReal Shell icons loaded for apps and folders.\nThree-row viewport, native scrolling, folder/path search and background-selection stability verified.\nNative Ctrl+A/C/V/X/Z editing verified with focus in search and results. Alt+1 calculator activation verified.\nApp and folder menus constructed; shortcut target resolution covered by Windows tests. No apps, folders or elevated processes launched.\n{count} icons cached. Lite maximum 48; Standard maximum 96.\nThis CI sample is not a real-world idle memory benchmark.", memory_report()?);
+    let report = format!("{}\nReal Shell icons loaded for apps and folders.\nThree-row viewport, native scrolling, folder/path search and background-selection stability verified.\nNative Ctrl+A/C/V/X/Z editing verified with focus in search and results. Alt+1 calculator activation verified.\nCommand palette binding, reboot alias and native confirmation cancellation verified. No power/session/delete action was executed; successful system changes require real-device testing.\nApp and folder menus constructed; shortcut target resolution covered by Windows tests. No apps, folders or elevated processes launched.\n{count} icons cached. Lite maximum 48; Standard maximum 96.\nThis CI sample is not a real-world idle memory benchmark.", memory_report()?);
     std::fs::write(root.join("smoke-result.txt"), report).map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -115,6 +128,59 @@ unsafe fn settle() {
         TranslateMessage(&message);
         DispatchMessageW(&message);
     }
+}
+
+unsafe fn verify_command_palette() -> Result<(), String> {
+    use throw_launcher::commands::SystemCommand;
+    let (edit, list, hwnd) = APP.with(|cell| {
+        let slot = cell.borrow();
+        let app = slot.as_ref().unwrap();
+        (app.edit, app.list, app.hwnd)
+    });
+    SetWindowTextW(edit, wide(">").as_ptr());
+    settle();
+    if SendMessageW(list, LB_GETCOUNT, 0, 0) < 30 {
+        return Err("Command palette did not bind the complete catalog.".into());
+    }
+    SetWindowTextW(edit, wide("reboot").as_ptr());
+    let restart = APP.with(|cell| {
+        matches!(
+            cell.borrow()
+                .as_ref()
+                .unwrap()
+                .rows
+                .first()
+                .map(|row| &row.action),
+            Some(Action::System(SystemCommand::Restart))
+        )
+    });
+    if !restart {
+        return Err("Reboot alias did not bind the restart action.".into());
+    }
+    ShowWindow(hwnd, SW_SHOW);
+    // Exercise the real Enter -> confirmation -> No path. Never click Yes or
+    // dispatch a power operation, even if the test fails.
+    let dismiss = std::thread::spawn(|| {
+        for _ in 0..500 {
+            let dialog = FindWindowW(
+                wide("#32770").as_ptr(),
+                wide("Confirm system action — Throw").as_ptr(),
+            );
+            if !dialog.is_null() {
+                SendMessageW(dialog, WM_COMMAND, IDNO as usize, 0);
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        false
+    });
+    SendMessageW(edit, WM_KEYDOWN, VK_RETURN as usize, 0);
+    if !dismiss.join().unwrap_or(false) || IsWindowVisible(hwnd) == 0 {
+        return Err("Restart confirmation cancellation failed.".into());
+    }
+    SetWindowTextW(edit, wide("").as_ptr());
+    settle();
+    Ok(())
 }
 
 unsafe fn verify_folders_and_scroll(root: &Path) -> Result<(), String> {
@@ -136,6 +202,20 @@ unsafe fn verify_folders_and_scroll(root: &Path) -> Result<(), String> {
     }
     // A late index update must not silently change what Enter will launch.
     SetWindowTextW(edit, wide("throw").as_ptr());
+    // Commands now also match "throw": explicitly select the app to keep this
+    // regression checking app identity across an asynchronously arriving folder.
+    let app_row = APP.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .unwrap()
+            .rows
+            .iter()
+            .position(|row| matches!(row.action, Action::App(_)))
+    });
+    let Some(app_row) = app_row else {
+        return Err("Throw app fixture missing.".into());
+    };
+    SendMessageW(list, LB_SETCURSEL, app_row, 0);
     let path = root.join("Throw");
     std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
     let before = APP.with(|cell| cell.borrow().as_ref().unwrap().selected_identity());

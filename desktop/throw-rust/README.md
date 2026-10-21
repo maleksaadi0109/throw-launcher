@@ -11,6 +11,38 @@ Download `throw-rust-windows-x64` from a successful run of the
 Extract the ZIP into a new folder and run **Throw.Rust.exe**.
 Windows may show a warning for this unsigned development executable.
 
+### Native command palette
+
+Type **`>`** to browse commands, or search by name (`reboot`, `shutdown`,
+`lock`, `sleep`, `hibernate`, `task manager`, `display`, `wifi`, `powershell`).
+Commands share the three-row scrollable results list with keyboard activation.
+Basic Arabic aliases are included for common power actions; the UI remains English.
+
+- Restart, shutdown, advanced recovery restart, sign out, sleep and hibernate
+  require a confirmation with **No selected by default**. Save your work first.
+  Windows is never instructed to force-close applications.
+- Lock your session; open or empty the Recycle Bin. Emptying it is permanent,
+  applies to all drives and requires a separate explicit confirmation.
+- Open Windows Settings and 12 common settings pages, Control Panel, Task
+  Manager and Windows indexing options. Hardware/Windows policies may limit
+  settings pages, sleep or hibernation; failures are reported, not hidden.
+- Open Command Prompt or PowerShell (without a profile). This opens a terminal,
+  **not** an arbitrary typed command executor.
+- Open Throw's profile, measure memory, switch Pearl/Graphite, rebuild the
+  index, open Throw Settings or quit.
+
+Query text is untrusted: bounded text only selects fixed enum actions. System
+executables come from the Windows system directory with separate constant
+arguments; Windows settings/Shell destinations come from a closed catalog.
+Result text is rendered as native text, not HTML. Typed arbitrary protocols,
+shell arguments and scripts are not accepted.
+
+This is the first native core-functionality expansion, **not full Flow parity**.
+Browser bookmarks, configurable web providers, advanced file search/preview,
+drag-and-drop/Dialog Jump, search history, game mode, automatic updates and the
+complete Settings redesign still require further work. Original Flow plugins
+are explicitly deferred; no .NET/Python/Node plugin runtime is loaded.
+
 - **Ctrl + Alt + Space** opens/hides the launcher (change it in Settings).
 - Type an application name. Use Up/Down and Enter, or double-click.
 - Search local **folders** by name too. Personal folders and a bounded set of

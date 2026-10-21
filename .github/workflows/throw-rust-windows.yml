@@ -48,7 +48,7 @@ jobs:
         run: |
           Add-Type -AssemblyName System.Drawing
           New-Item -ItemType Directory -Force "../../generated-artifacts/throw-rust/screenshots" | Out-Null
-          foreach ($theme in @("ink", "paper")) {
+          foreach ($theme in @("ink", "paper", "commands")) {
             $bmp = [System.Drawing.Bitmap]::FromFile("$PWD/target/release/throw-$theme.bmp")
             try {
               $bmp.Save("$PWD/../../generated-artifacts/throw-rust/screenshots/throw-$theme.png", [System.Drawing.Imaging.ImageFormat]::Png)

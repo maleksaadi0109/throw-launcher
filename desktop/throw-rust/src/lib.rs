@@ -1,4 +1,5 @@
 pub mod calculator;
+pub mod commands;
 pub mod config;
 pub mod folders;
 pub mod index;

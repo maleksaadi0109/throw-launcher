@@ -6,6 +6,8 @@ pub const MAX_QUERY: usize = 512;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
+    System(crate::commands::SystemCommand),
+    Utility(crate::commands::UtilityCommand),
     App(usize),
     Folder(PathBuf),
     Url(String),
@@ -38,28 +40,8 @@ pub fn query_all(
     }
     let mut rows = Vec::new();
     if input.starts_with('>') {
-        let filter = input.trim_start_matches('>').trim().to_lowercase();
-        for (title, detail, action) in [
-            (
-                "Settings",
-                "Appearance, shortcut, privacy and resources",
-                Action::Settings,
-            ),
-            (
-                "Rebuild search index",
-                "Refresh applications and local folders",
-                Action::Reindex,
-            ),
-            ("Quit Throw", "Exit the Rust launcher", Action::Quit),
-        ] {
-            if title.to_lowercase().contains(&filter) {
-                rows.push(ResultRow {
-                    title: title.into(),
-                    detail: detail.into(),
-                    action,
-                });
-            }
-        }
+        rows = crate::commands::search(input.trim_start_matches('>'));
+        rows.truncate(settings.max_results);
         return rows;
     }
     if settings.calculator && input.starts_with('=') {
@@ -158,6 +140,14 @@ pub fn query_all(
         }
         rows.truncate(settings.max_results);
     }
+    // Commands are discoverable without a special prefix, but never offered
+    // on the empty launch screen. No user text becomes an executable argument.
+    if needle.chars().count() >= 2 {
+        let mut commands = crate::commands::search(&needle);
+        commands.append(&mut rows);
+        commands.truncate(settings.max_results);
+        rows = commands;
+    }
     rows
 }
 
@@ -243,6 +233,17 @@ mod tests {
         assert!(query("= 1/0", &[], &s).is_empty());
         assert_eq!(query("?", &[], &s).len(), 0);
         assert!(query(&"x".repeat(513), &[], &s).is_empty());
+        assert!(matches!(
+            query("reboot", &[], &s)[0].action,
+            Action::System(crate::commands::SystemCommand::Restart)
+        ));
+        assert_eq!(query(">", &[], &s).len(), crate::commands::search("").len());
+        let limited = Settings {
+            max_results: 4,
+            ..s
+        };
+        assert_eq!(query(">", &[], &limited).len(), 4);
+        assert!(query(">restart && calc.exe", &[], &limited).is_empty());
     }
     #[test]
     fn urls_reject_unsafe_protocols_and_encode_search_terms() {
